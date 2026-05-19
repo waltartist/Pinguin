@@ -1,0 +1,34 @@
+{
+  "applicationId": "dev.pi.gui",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "url": "/",
+  "documentRoot": "/resources/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "enableExtensions": true,
+  "nativeBlockList": [],
+  "extensions": [
+    {
+      "id": "pi-backend",
+      "commandWindows": "node ${NL_PATH}\\src\\backend\\main.js",
+      "commandLinux": "node ${NL_PATH}/src/backend/main.js",
+      "commandDarwin": "node ${NL_PATH}/src/backend/main.js"
+    }
+  ],
+  "modes": {
+    "window": {
+      "title": "Pi GUI",
+      "width": 1100,
+      "height": 700,
+      "fullScreen": false
+    }
+  },
+  "cli": {
+    "binaryName": "pi-gui",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "binaryVersion": "6.7.0"
+  }
+}
