@@ -35,7 +35,7 @@ async function readFileContent(filePath: string): Promise<FileContent> {
   // Try Neutralino first
   try {
     if (typeof Neutralino !== "undefined" && (Neutralino as any).filesystem) {
-      const data = await (Neutralino as any).filesystem.readFile(resolved, { pos: 0, size: 0 });
+      const data = await (Neutralino as any).filesystem.readFile(resolved, { pos: 0 });
       return { text: data };
     }
   } catch {

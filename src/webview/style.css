@@ -283,6 +283,29 @@ body {
 }
 .message-user .message-role { text-align: right; }
 
+/* System message — centered notice for command echoes and built-in feedback */
+.message-system {
+  align-self: center;
+  max-width: 88%;
+}
+.message-system-body {
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.message-system-error .message-system-body {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
 /* Assistant message — flat, left-aligned */
 .message-assistant {
   align-self: flex-start;
@@ -456,6 +479,71 @@ body {
 .composer-input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Slash command autocomplete popup */
+.composer-slash {
+  margin-bottom: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  animation: piRise 0.18s ease-out;
+}
+
+.composer-slash-item {
+  display: grid;
+  grid-template-columns: 14px 140px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.composer-slash-item-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.composer-slash-arrow {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  text-align: center;
+}
+.composer-slash-item:not(.composer-slash-item-active) .composer-slash-arrow {
+  color: transparent;
+}
+
+.composer-slash-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.composer-slash-item-active .composer-slash-name {
+  color: var(--accent-text);
+}
+
+.composer-slash-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-slash-source {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .composer-actions {

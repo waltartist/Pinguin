@@ -145,6 +145,33 @@ function initBridge() {
     usePiStore.getState()._setModel(raw.detail.model);
   });
 
+  // Built-in command feedback. The SDK does not emit agent events for
+  // commands handled outside the agent loop (extension commands and our
+  // own GUI builtins), so the backend pings these events to keep the UI
+  // in sync.
+  Neutralino.events.on("pi:notice", (raw: any) => {
+    const text = raw?.detail?.text;
+    const isError = !!raw?.detail?.isError;
+    if (typeof text === "string" && text.length > 0) {
+      usePiStore.getState()._addNotice(text, isError);
+    }
+  });
+
+  Neutralino.events.on("pi:command_done", () => {
+    usePiStore.getState()._setStreaming(false);
+  });
+
+  Neutralino.events.on("pi:reset", (raw: any) => {
+    const cwd = raw?.detail?.cwd;
+    usePiStore.getState()._resetMessages();
+    if (typeof cwd === "string") usePiStore.getState()._setReady(cwd);
+  });
+
+  Neutralino.events.on("pi:commands", (raw: any) => {
+    const list = raw?.detail?.commands;
+    if (Array.isArray(list)) usePiStore.getState()._setCommands(list);
+  });
+
   // ── Retry / fallback: if still not ready, re-request state ──
   let retries = 0;
   const retryHello = () => {

@@ -43,17 +43,305 @@ function broadcastToApp(event, data) {
   return callMethod("app.broadcast", { event, data });
 }
 
-// Module-level Pi session reference (set once on connect)
+// Module-level Pi session reference (set once on connect, replaced on /new)
 let session = null;
+let sessionUnsub = null;
+
+function subscribeSession() {
+  sessionUnsub = session.subscribe((event) => {
+    broadcastToApp("pi:event", event).catch((e) =>
+      log(`Broadcast failed: ${e.message}`, "ERROR")
+    );
+  });
+}
+
+// ── Built-in slash commands ───────────────────────────────────────
+// Pi's CLI handles these directly; the SDK does not. Reimplement here so
+// the GUI exposes the same vocabulary.
+
+const builtinDescriptions = {
+  new: "Start a new session",
+  compact: "Manually compact the session context",
+  reload: "Reload extensions, skills, prompts, themes",
+  export: "Export session (HTML default, or specify path: .html/.jsonl)",
+  copy: "Copy last agent message to clipboard",
+  name: "Set session display name",
+  session: "Show session info and stats",
+  quit: "Quit Pi GUI",
+  model: "Show or switch model",
+  "scoped-models": "Show scoped models",
+  settings: "Show settings",
+  hotkeys: "Show all keyboard shortcuts",
+  changelog: "Show Pi SDK changelog",
+};
+
+const builtins = {
+  async new() {
+    if (sessionUnsub) sessionUnsub();
+    session = await createPiSession();
+    subscribeSession();
+    await broadcastToApp("pi:reset", { cwd: process.cwd() });
+    await broadcastCommands();
+    return { text: "New session started." };
+  },
+
+  async compact(args) {
+    await session.compact(args || undefined);
+    return { text: "Context compacted." };
+  },
+
+  async reload() {
+    await session.reload();
+    await broadcastCommands();
+    return { text: "Reloaded extensions, skills, prompts, themes." };
+  },
+
+  async export(args) {
+    const trimmed = args?.trim();
+    const path = trimmed && trimmed.endsWith(".jsonl")
+      ? session.exportToJsonl(trimmed)
+      : await session.exportToHtml(trimmed || undefined);
+    return { text: `Exported session → ${path}` };
+  },
+
+  async copy() {
+    const text = session.getLastAssistantText();
+    if (!text) return { text: "No assistant message to copy.", isError: true };
+    await callMethod("clipboard.writeText", { data: text });
+    return { text: "Copied last assistant message." };
+  },
+
+  async name(args) {
+    if (!args) return { text: "Usage: /name <session name>", isError: true };
+    session.setSessionName(args);
+    return { text: `Session named: ${args}` };
+  },
+
+  async session() {
+    const stats = session.getSessionStats();
+    return { text: formatStats(stats) };
+  },
+
+  async quit() {
+    // Allow the notice to flush before exit.
+    setTimeout(() => callMethod("app.exit", {}).catch(() => {}), 100);
+    return { text: "Exiting…" };
+  },
+
+  async model(args) {
+    const trimmed = args?.trim();
+    const available = session.modelRegistry.getAvailable();
+    if (!trimmed) {
+      const current = session.model;
+      const lines = ["Available models:"];
+      for (const m of available) {
+        const mark = current && m.provider === current.provider && m.id === current.id ? "* " : "  ";
+        lines.push(`${mark}${m.provider}:${m.id}${m.name ? ` — ${m.name}` : ""}`);
+      }
+      lines.push("");
+      lines.push("Switch: /model <provider>:<id>  or  /model <id>");
+      return { text: lines.join("\n") };
+    }
+    let provider;
+    let id;
+    if (trimmed.includes(":")) {
+      const idx = trimmed.indexOf(":");
+      provider = trimmed.slice(0, idx);
+      id = trimmed.slice(idx + 1);
+    } else {
+      id = trimmed;
+    }
+    const found = provider
+      ? available.find((m) => m.provider === provider && m.id === id)
+      : available.find((m) => m.id === id);
+    if (!found) return { text: `Model not found: ${trimmed}`, isError: true };
+    await session.setModel(found);
+    return { text: `Model → ${found.provider}:${found.id}` };
+  },
+
+  async "scoped-models"() {
+    const scoped = session.scopedModels;
+    if (!scoped || scoped.length === 0) {
+      return { text: "No scoped models configured." };
+    }
+    const lines = ["Scoped models:"];
+    for (const s of scoped) {
+      const lvl = s.thinkingLevel ? ` (${s.thinkingLevel})` : "";
+      lines.push(`  ${s.model.provider}:${s.model.id}${lvl}`);
+    }
+    return { text: lines.join("\n") };
+  },
+
+  async settings() {
+    const model = session.model;
+    const lines = [
+      `model: ${model ? `${model.provider}:${model.id}` : "(none)"}`,
+      `thinkingLevel: ${session.thinkingLevel}`,
+      `steeringMode: ${session.steeringMode}`,
+      `followUpMode: ${session.followUpMode}`,
+      `autoCompactionEnabled: ${session.autoCompactionEnabled}`,
+      `sessionId: ${session.sessionId}`,
+      `sessionName: ${session.sessionName || "(none)"}`,
+    ];
+    return { text: lines.join("\n") };
+  },
+
+  async hotkeys() {
+    return {
+      text: [
+        "Composer:",
+        "  Enter           Send",
+        "  Shift+Enter     Newline",
+        "",
+        "Slash commands:",
+        "  /new                  Start new session",
+        "  /compact [hint]       Manually compact context",
+        "  /reload               Reload extensions/skills/prompts/themes",
+        "  /export [path]        Export session (HTML or .jsonl)",
+        "  /copy                 Copy last assistant message",
+        "  /name <name>          Name session",
+        "  /session              Session stats",
+        "  /model [provider:id]  Show or switch model",
+        "  /scoped-models        Show scoped models",
+        "  /settings             Show settings",
+        "  /hotkeys              This list",
+        "  /changelog            Show Pi SDK changelog",
+        "  /quit                 Exit",
+      ].join("\n"),
+    };
+  },
+
+  async changelog() {
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const pathMod = await import("node:path");
+      const osMod = await import("node:os");
+      const sdkDir = pathMod.join(
+        process.env.APPDATA || pathMod.join(osMod.homedir(), ".npm-global"),
+        "npm",
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent"
+      );
+      const content = await readFile(pathMod.join(sdkDir, "CHANGELOG.md"), "utf-8");
+      const lines = content.split("\n").slice(0, 80);
+      return { text: lines.join("\n") };
+    } catch (err) {
+      return { text: `Changelog unavailable: ${err.message || err}`, isError: true };
+    }
+  },
+};
+
+function listCommands() {
+  const out = [];
+  for (const [name, desc] of Object.entries(builtinDescriptions)) {
+    out.push({ name, description: desc, source: "builtin" });
+  }
+  if (!session) return out;
+  try {
+    for (const c of session.extensionRunner.getRegisteredCommands()) {
+      out.push({
+        name: c.invocationName,
+        description: c.description || "",
+        source: "extension",
+      });
+    }
+  } catch (err) {
+    log(`listCommands extensions: ${err.message}`, "ERROR");
+  }
+  try {
+    for (const t of session.promptTemplates) {
+      out.push({
+        name: t.name,
+        description: t.description || "",
+        source: "prompt",
+      });
+    }
+  } catch {}
+  try {
+    for (const s of session.resourceLoader.getSkills().skills) {
+      out.push({
+        name: `skill:${s.name}`,
+        description: s.description || "",
+        source: "skill",
+      });
+    }
+  } catch {}
+  return out;
+}
+
+function broadcastCommands() {
+  return broadcastToApp("pi:commands", { commands: listCommands() }).catch((e) =>
+    log(`Broadcast commands failed: ${e.message}`, "ERROR")
+  );
+}
+
+function formatStats(stats) {
+  const lines = [];
+  for (const [k, v] of Object.entries(stats)) {
+    const val = v && typeof v === "object" ? JSON.stringify(v) : v;
+    lines.push(`${k}: ${val}`);
+  }
+  return lines.join("\n");
+}
+
+function parseCommand(text) {
+  const spaceIdx = text.indexOf(" ");
+  const name = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+  const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+  return { name, args };
+}
+
+async function tryBuiltin(text) {
+  const { name, args } = parseCommand(text);
+  const handler = builtins[name];
+  if (!handler) return false;
+  try {
+    const result = await handler(args);
+    if (result?.text) {
+      await broadcastToApp("pi:notice", {
+        text: result.text,
+        isError: !!result.isError,
+      });
+    }
+  } catch (err) {
+    await broadcastToApp("pi:notice", {
+      text: `/${name}: ${err.message || err}`,
+      isError: true,
+    });
+  }
+  return true;
+}
 
 // Handle incoming messages from the webview
-function handleWebviewInput(data) {
+async function handleWebviewInput(data) {
   if (!session) return;
   const { type, payload } = data || {};
-  if (type === "prompt") {
-    session.prompt(payload.message, { images: payload.images || [] });
-  } else if (type === "abort") {
-    session.abort();
+  try {
+    if (type === "prompt") {
+      const text = payload?.message || "";
+      if (text.startsWith("/")) {
+        const handled = await tryBuiltin(text);
+        if (handled) {
+          await broadcastToApp("pi:command_done", {});
+          return;
+        }
+      }
+      await session.prompt(text, { images: payload?.images || [] });
+      // Extension commands return immediately without firing the agent loop.
+      // Unstick the streaming UI in that case.
+      if (!session.isStreaming) {
+        await broadcastToApp("pi:command_done", {});
+      }
+    } else if (type === "abort") {
+      session.abort();
+    }
+  } catch (err) {
+    await broadcastToApp("pi:notice", {
+      text: err.message || String(err),
+      isError: true,
+    });
+    await broadcastToApp("pi:command_done", {});
   }
 }
 
@@ -67,11 +355,7 @@ ws.addEventListener("open", async () => {
     log("Pi session created");
 
     // All Pi events → broadcast to webview
-    session.subscribe((event) => {
-      broadcastToApp("pi:event", event).catch((e) =>
-        log(`Broadcast failed: ${e.message}`, "ERROR")
-      );
-    });
+    subscribeSession();
 
     // Start extension file watcher. The watcher expects a Neutralino-like
     // shape with .events.broadcast(event, data) — wrap our RPC fn.
@@ -81,6 +365,7 @@ ws.addEventListener("open", async () => {
 
     // Signal webview that Pi is ready
     await broadcastToApp("pi:ready", { cwd: process.cwd() });
+    await broadcastCommands();
     log("Pi GUI ready");
   } catch (err) {
     log(`Fatal: ${err.message}`, "ERROR");
@@ -110,7 +395,9 @@ ws.addEventListener("message", (event) => {
 
     // Handle events from the webview (dispatched via extensions.dispatch)
     if (msg.event === "pi:input") {
-      handleWebviewInput(msg.data);
+      handleWebviewInput(msg.data).catch((err) =>
+        log(`handleWebviewInput failed: ${err.message}`, "ERROR")
+      );
     }
 
     // Webview just connected — rebroadcast current status
@@ -119,6 +406,7 @@ ws.addEventListener("message", (event) => {
       broadcastToApp("pi:ready", { cwd: process.cwd() }).catch((e) =>
         log(`Rebroadcast ready failed: ${e.message}`, "ERROR")
       );
+      if (session) broadcastCommands();
     }
   } catch (err) {
     log(`Message parse error: ${err.message}`, "ERROR");

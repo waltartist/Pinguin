@@ -8,9 +8,16 @@ export type Block =
 
 export interface Message {
   id: string;
-  role: "user" | "assistant" | "toolResult";
+  role: "user" | "assistant" | "toolResult" | "system";
   blocks: Block[];
   timestamp?: number;
+  isError?: boolean;
+}
+
+export interface SlashCommand {
+  name: string;
+  description: string;
+  source: "builtin" | "extension" | "skill" | "prompt";
 }
 
 interface PiState {
@@ -21,6 +28,7 @@ interface PiState {
   error: string | null;
   connectionError: string | null;
   cwd: string | null;
+  commands: SlashCommand[];
 }
 
 interface PiActions {
@@ -35,6 +43,9 @@ interface PiActions {
   _setModel: (model: string | null) => void;
   _setError: (err: string | null) => void;
   _setConnectionError: (err: string | null) => void;
+  _addNotice: (text: string, isError?: boolean) => void;
+  _resetMessages: () => void;
+  _setCommands: (commands: SlashCommand[]) => void;
 }
 
 export const usePiStore = create<PiState & PiActions>()((set, get) => ({
@@ -45,16 +56,27 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   error: null,
   connectionError: null,
   cwd: null,
+  commands: [],
 
   sendPrompt: (text) => {
     if (!get().isReady || get().isStreaming) return;
 
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      blocks: [{ type: "text", text }],
-      timestamp: Date.now(),
-    };
+    // Slash-prefixed input is a command echo, not a chat turn. Render it
+    // distinctly so the transcript doesn't look like a user said "/quit".
+    const isCommand = text.startsWith("/");
+    const userMsg: Message = isCommand
+      ? {
+          id: crypto.randomUUID(),
+          role: "system",
+          blocks: [{ type: "text", text: `> ${text}` }],
+          timestamp: Date.now(),
+        }
+      : {
+          id: crypto.randomUUID(),
+          role: "user",
+          blocks: [{ type: "text", text }],
+          timestamp: Date.now(),
+        };
     set((s) => ({
       messages: [...s.messages, userMsg],
       isStreaming: true,
@@ -111,4 +133,19 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   _setModel: (model) => set({ model }),
   _setError: (err) => set({ error: err }),
   _setConnectionError: (err) => set({ connectionError: err }),
+  _addNotice: (text, isError) =>
+    set((s) => ({
+      messages: [
+        ...s.messages,
+        {
+          id: `system-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: "system",
+          blocks: [{ type: "text", text }],
+          timestamp: Date.now(),
+          isError,
+        },
+      ],
+    })),
+  _resetMessages: () => set({ messages: [], isStreaming: false, error: null }),
+  _setCommands: (commands) => set({ commands }),
 }));

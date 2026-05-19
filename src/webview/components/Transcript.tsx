@@ -52,6 +52,20 @@ export function Transcript() {
 }
 
 function MessageView({ msg, isStreaming }: { msg: Message; isStreaming: boolean }) {
+  if (msg.role === "system") {
+    const text = msg.blocks
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+    return (
+      <div
+        className={`message message-system${msg.isError ? " message-system-error" : ""}`}
+      >
+        <div className="message-system-body">{text}</div>
+      </div>
+    );
+  }
+
   if (msg.role === "user") {
     return (
       <div className="message message-user">
