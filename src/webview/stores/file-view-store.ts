@@ -25,8 +25,11 @@ export const useFileViewStore = create<FileViewState>()((set) => ({
   openFile: null,
   recentFiles: [],
 
-  open: (path) =>
+  open: (rawPath) =>
     set((s) => {
+      const path = rawPath
+        .replace(/^[`'"@\s]+/, "")
+        .replace(/[`'"\s]+$/, "");
       const entry: FileViewEntry = {
         path,
         filename: filenameFromPath(path),

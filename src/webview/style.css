@@ -393,8 +393,17 @@ body {
   min-width: 0;
 }
 
+.block-thinking-label {
+  padding: 8px 12px 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
 .block-thinking-body {
-  padding: 0 12px 12px 30px;
+  padding: 0 12px 12px 12px;
   color: var(--text-muted);
   font-family: var(--font);
   font-style: normal;

@@ -18,8 +18,94 @@ import { useFileViewStore } from "../../stores/file-view-store";
 
 type IconKey = keyof typeof Icon;
 
-const LAYOUT_KEY = "pi-gui-dock-layout";
+// Neutralino.storage key constraint: ^[a-zA-Z-_0-9]{1,50}$
+const LAYOUT_KEY = "pi_gui_dock_layout";
+const CLOSED_KEY = "pi_gui_dock_closed_panels";
 const EXTENSION_ID_PREFIX = "ext-";
+
+// Async-loaded persisted state. Read from Neutralino.storage on boot;
+// localStorage is a dev-only fallback. closedPanels survives reload so
+// auto-add paths (extension hot-load, default layout) don't resurrect
+// panels the user dismissed.
+const closedPanels: Set<string> = new Set();
+let loadedLayout: unknown = null;
+let storageReady = false;
+
+async function nlGet(key: string): Promise<string | null> {
+  try {
+    if (
+      typeof Neutralino !== "undefined" &&
+      (Neutralino as any).storage?.getData
+    ) {
+      return await (Neutralino as any).storage.getData(key);
+    }
+  } catch {
+    // Neutralino throws NE_ST_NOSTKEX when key not yet written — treat as null
+  }
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+async function nlSet(key: string, value: string): Promise<void> {
+  try {
+    if (
+      typeof Neutralino !== "undefined" &&
+      (Neutralino as any).storage?.setData
+    ) {
+      await (Neutralino as any).storage.setData(key, value);
+      return;
+    }
+  } catch (err) {
+    console.warn(`storage write failed for ${key}`, err);
+  }
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore — no persistence available
+  }
+}
+
+export async function loadDockStorage(): Promise<void> {
+  if (storageReady) return;
+  const [layoutRaw, closedRaw] = await Promise.all([
+    nlGet(LAYOUT_KEY),
+    nlGet(CLOSED_KEY),
+  ]);
+  if (layoutRaw) {
+    try {
+      loadedLayout = JSON.parse(layoutRaw);
+    } catch {
+      loadedLayout = null;
+    }
+  }
+  if (closedRaw) {
+    try {
+      const arr = JSON.parse(closedRaw);
+      if (Array.isArray(arr)) for (const id of arr) closedPanels.add(id);
+    } catch {
+      // ignore
+    }
+  }
+  storageReady = true;
+}
+
+function saveClosed() {
+  void nlSet(CLOSED_KEY, JSON.stringify([...closedPanels]));
+}
+
+function markClosed(id: string) {
+  if (closedPanels.has(id)) return;
+  closedPanels.add(id);
+  saveClosed();
+}
+
+function markOpen(id: string) {
+  if (!closedPanels.delete(id)) return;
+  saveClosed();
+}
 
 const emberTheme: DockviewTheme = {
   name: "ember",
@@ -77,7 +163,8 @@ function extensionPanelId(id: string) {
 export function addExtensionPanel(
   id: string,
   title: string,
-  iconKey: IconKey = "Plus"
+  iconKey: IconKey = "Plus",
+  options: { userInitiated?: boolean } = {}
 ) {
   if (!dockApi) {
     pendingExtensions.push({ id, title, iconKey });
@@ -85,6 +172,11 @@ export function addExtensionPanel(
   }
   const panelId = extensionPanelId(id);
   if (dockApi.getPanel(panelId)) return;
+
+  // Background hot-load: respect prior user dismissal. Menu toggle passes
+  // userInitiated=true to override.
+  if (!options.userInitiated && closedPanels.has(panelId)) return;
+  markOpen(panelId);
 
   const referencePanel =
     dockApi.getPanel("tools") ?? dockApi.getPanel("chat");
@@ -120,6 +212,7 @@ export function openMarkdownFile(path: string) {
     // Add the markdown panel if not already present
     const referencePanel =
       dockApi.getPanel("tools") ?? dockApi.getPanel("chat");
+    markOpen("markdown");
     dockApi.addPanel({
       id: "markdown",
       component: "markdown",
@@ -132,8 +225,14 @@ export function openMarkdownFile(path: string) {
   }
 }
 
-function addBuiltinPanel(api: DockviewApi, def: BuiltinPanelDef) {
+function addBuiltinPanel(
+  api: DockviewApi,
+  def: BuiltinPanelDef,
+  options: { userInitiated?: boolean } = {}
+) {
   if (api.getPanel(def.id)) return;
+  if (!options.userInitiated && closedPanels.has(def.id)) return;
+  markOpen(def.id);
   api.addPanel({
     id: def.id,
     component: def.component,
@@ -148,7 +247,7 @@ function persist(api: DockviewApi) {
   saveTimer = setTimeout(() => {
     try {
       const json = api.toJSON();
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(json));
+      void nlSet(LAYOUT_KEY, JSON.stringify(json));
     } catch (err) {
       console.warn("dock layout save failed", err);
     }
@@ -156,36 +255,41 @@ function persist(api: DockviewApi) {
 }
 
 function tryRestoreLayout(api: DockviewApi): boolean {
-  const raw = localStorage.getItem(LAYOUT_KEY);
-  if (!raw) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    localStorage.removeItem(LAYOUT_KEY);
-    return false;
-  }
+  const parsed = loadedLayout;
   if (
     !parsed ||
     typeof parsed !== "object" ||
     !("grid" in (parsed as Record<string, unknown>))
   ) {
-    localStorage.removeItem(LAYOUT_KEY);
+    loadedLayout = null;
     return false;
   }
   try {
     api.fromJSON(parsed as Parameters<DockviewApi["fromJSON"]>[0]);
+    // Restored an empty layout (user closed everything) — fall back to default
+    // so the window isn't just a watermark on next launch.
+    if (api.panels.length === 0) {
+      api.clear();
+      return false;
+    }
     return true;
   } catch (err) {
     console.warn("dock layout restore failed, falling back to default", err);
     api.clear();
-    localStorage.removeItem(LAYOUT_KEY);
+    loadedLayout = null;
     return false;
   }
 }
 
 function buildDefaultLayout(api: DockviewApi) {
-  for (const def of BUILTIN_PANELS) addBuiltinPanel(api, def);
+  // Fresh start: clear any stale closed-set entries and open only chat.
+  // Other built-ins reachable via panel menu; they slot in relative to chat.
+  if (closedPanels.size > 0) {
+    closedPanels.clear();
+    saveClosed();
+  }
+  const chat = BUILTIN_PANELS.find((d) => d.id === "chat");
+  if (chat) addBuiltinPanel(api, chat, { userInitiated: true });
 }
 
 // ── panel content wrappers (dockview passes IDockviewPanelProps; ignore) ──
@@ -248,7 +352,7 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
       isOpen: !!panel,
       onToggle: () => {
         if (panel) panel.api.close();
-        else addBuiltinPanel(api, def);
+        else addBuiltinPanel(api, def, { userInitiated: true });
       },
     });
   }
@@ -263,7 +367,7 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
       isOpen: !!panel,
       onToggle: () => {
         if (panel) panel.api.close();
-        else addExtensionPanel(ext.id, ext.title);
+        else addExtensionPanel(ext.id, ext.title, "Plus", { userInitiated: true });
       },
     });
   }
@@ -315,7 +419,13 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
 export function Shell() {
   const initialized = useRef(false);
   const [api, setApi] = useState<DockviewApi | null>(null);
+  const [storageLoaded, setStorageLoaded] = useState(storageReady);
   const openFile = useFileViewStore((s) => s.openFile);
+
+  useEffect(() => {
+    if (storageReady) return;
+    loadDockStorage().then(() => setStorageLoaded(true));
+  }, []);
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     dockApi = event.api;
@@ -333,6 +443,26 @@ export function Shell() {
     }
 
     event.api.onDidLayoutChange(() => persist(event.api));
+
+    event.api.onDidRemovePanel((panel) => {
+      markClosed(panel.id);
+    });
+
+    const flush = () => {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      try {
+        void nlSet(LAYOUT_KEY, JSON.stringify(event.api.toJSON()));
+      } catch (err) {
+        console.warn("dock layout flush failed", err);
+      }
+    };
+    window.addEventListener("beforeunload", flush);
+    if (typeof Neutralino !== "undefined") {
+      Neutralino.events.on("windowClose", flush);
+    }
 
     // Suppress drop overlay on source group's content/edge zones — dropping
     // a tab onto its own group is a no-op, and the overlay obscures the
@@ -368,6 +498,10 @@ export function Shell() {
       });
     }
   }, [openFile]);
+
+  if (!storageLoaded) {
+    return <div className="pi-dock-shell" />;
+  }
 
   return (
     <div className="pi-dock-shell">

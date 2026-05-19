@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePi } from "../lib/use-pi";
 import type { Block, Message } from "../stores/pi-store";
 import { useFileViewStore } from "../stores/file-view-store";
-import { PresenceDot, Icon } from "./ember";
+import { Icon } from "./ember";
 
 export function Transcript() {
   const messages = usePi((s) => s.messages);
@@ -17,10 +17,6 @@ export function Transcript() {
     if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages]);
 
-  const last = messages[messages.length - 1];
-  const showPendingCursor =
-    isStreaming && (!last || last.role !== "assistant" || last.blocks.length === 0);
-
   return (
     <div className="transcript" ref={containerRef}>
       {messages.length === 0 && (
@@ -32,20 +28,6 @@ export function Transcript() {
       {messages.map((msg) => (
         <MessageView key={msg.id} msg={msg} isStreaming={isStreaming} />
       ))}
-      {showPendingCursor && (
-        <div className="message message-assistant">
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-            }}
-          >
-            <PresenceDot state="thinking" size={8} />
-            <span className="streaming-cursor" />
-          </div>
-        </div>
-      )}
       <div ref={bottomRef} />
     </div>
   );
@@ -92,25 +74,13 @@ function MessageView({ msg, isStreaming }: { msg: Message; isStreaming: boolean 
   }
 
   // Assistant
-  const isLast = msg === undefined; // not used here, but kept for parity
-  void isLast;
+  void isStreaming;
   return (
     <div className="message message-assistant">
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ marginTop: 4 }}>
-          <PresenceDot state={isStreaming ? "thinking" : "idle"} size={8} />
-        </div>
-        <div
-          className="message-blocks"
-          style={{ flex: 1, minWidth: 0 }}
-        >
-          {msg.blocks.map((b, i) => (
-            <BlockView key={i} block={b} />
-          ))}
-          {isStreaming && msg.blocks.length > 0 && (
-            <span className="streaming-cursor" />
-          )}
-        </div>
+      <div className="message-blocks">
+        {msg.blocks.map((b, i) => (
+          <BlockView key={i} block={b} />
+        ))}
       </div>
     </div>
   );
@@ -118,8 +88,14 @@ function MessageView({ msg, isStreaming }: { msg: Message; isStreaming: boolean 
 
 function BlockView({ block }: { block: Block }) {
   switch (block.type) {
-    case "text":
-      return <div className="message-content">{block.text}</div>;
+    case "text": {
+      const mdFiles = extractMdFilesFromText(block.text);
+      return (
+        <div className="message-content">
+          {mdFiles.length > 0 ? splitWithLinks(block.text, mdFiles, true) : block.text}
+        </div>
+      );
+    }
     case "thinking":
       return <ThinkingBlock text={block.text} />;
     case "toolCall":
@@ -136,13 +112,10 @@ function BlockView({ block }: { block: Block }) {
 }
 
 function ThinkingBlock({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
   return (
     <div className="block-thinking">
-      <button className="block-toggle" onClick={() => setOpen((v) => !v)}>
-        <span className="block-chevron">{open ? "▾" : "▸"}</span> thinking
-      </button>
-      {open && <div className="block-thinking-body">{text}</div>}
+      <div className="block-thinking-label">thinking</div>
+      <div className="block-thinking-body">{text}</div>
     </div>
   );
 }
@@ -235,29 +208,36 @@ interface MdFileMatch {
   end: number;
 }
 
-/** Extract markdown file paths from tool result text. Only returns matches
- *  when the tool is write or edit. */
-function extractMdFiles(text: string, toolName: string | undefined): MdFileMatch[] {
-  if (!isFileTool(toolName)) return [];
-
+/** Extract markdown file paths from ANY text. Strips leading @ (from @-mentions).
+ *  Matches absolute/relative paths ending in .md. */
+function extractMdFilesFromText(text: string): MdFileMatch[] {
   const results: MdFileMatch[] = [];
-  // Match file paths — absolute or relative paths ending in .md
-  // Common patterns from tool output:
-  //   "Wrote contents to /path/to/file.md"
-  //   "Successfully wrote 1234 bytes to path/to/file.md"
-  //   "Edited file: /path/to/file.md"
-  //   "Successfully replaced ... in /path/to/file.md"
   const re = /((?:[A-Za-z]:[\\/])?[^\s()<>]+\.md)\b/gi;
 
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
-    const path = match[1];
-    // Skip duplicates at same position
-    if (results.some((r) => r.path === path && r.start === match!.index)) continue;
-    results.push({ path, start: match.index, end: match.index + path.length });
+    const raw = match[1];
+    // Strip leading wrappers from @-mentions / inline code (e.g. `@EMBER.md`)
+    const lead = raw.match(/^[`'"@]+/);
+    const leadLen = lead ? lead[0].length : 0;
+    const trail = raw.match(/[`'"]+$/);
+    const trailLen = trail ? trail[0].length : 0;
+    const path = raw.slice(leadLen, raw.length - trailLen);
+    if (!path) continue;
+    const start = match.index + leadLen;
+    const end = match.index + raw.length - trailLen;
+    if (results.some((r) => r.path === path && r.start === start)) continue;
+    results.push({ path, start, end });
   }
 
   return results;
+}
+
+/** Extract markdown file paths from tool result text. Only returns matches
+ *  when the tool is write or edit. */
+function extractMdFiles(text: string, toolName: string | undefined): MdFileMatch[] {
+  if (!isFileTool(toolName)) return [];
+  return extractMdFilesFromText(text);
 }
 
 /** Split text into segments, replacing .md file paths with clickable links.

@@ -45,7 +45,10 @@ export function StatusBar() {
       {model && (
         <>
           <span className="status-sep">·</span>
-          <span className="status-item">{model}</span>
+          <span className="status-item">
+            <span className="status-dim">{model.provider}:</span>
+            {model.id}
+          </span>
         </>
       )}
       <span style={{ flex: 1 }} />

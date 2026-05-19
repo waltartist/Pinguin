@@ -1,4 +1,4 @@
-import { usePiStore, type Block, type Message } from "../stores/pi-store";
+import { usePiStore, _resolveFileSearch, type Block, type Message } from "../stores/pi-store";
 
 // ── Bridge Neutralino events into Zustand ──
 
@@ -142,7 +142,12 @@ function initBridge() {
   });
 
   Neutralino.events.on("pi:model", (raw: any) => {
-    usePiStore.getState()._setModel(raw.detail.model);
+    const m = raw?.detail?.model;
+    if (m && typeof m.provider === "string" && typeof m.id === "string") {
+      usePiStore.getState()._setModel({ provider: m.provider, id: m.id });
+    } else {
+      usePiStore.getState()._setModel(null);
+    }
   });
 
   // Built-in command feedback. The SDK does not emit agent events for
@@ -165,6 +170,14 @@ function initBridge() {
     const cwd = raw?.detail?.cwd;
     usePiStore.getState()._resetMessages();
     if (typeof cwd === "string") usePiStore.getState()._setReady(cwd);
+  });
+
+  Neutralino.events.on("pi:files_result", (raw: any) => {
+    const requestId = raw?.detail?.requestId;
+    const items = raw?.detail?.items;
+    if (typeof requestId === "string" && Array.isArray(items)) {
+      _resolveFileSearch(requestId, items);
+    }
   });
 
   Neutralino.events.on("pi:commands", (raw: any) => {

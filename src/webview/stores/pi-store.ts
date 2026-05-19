@@ -1,5 +1,10 @@
 import { create } from "zustand";
 
+export interface ModelInfo {
+  provider: string;
+  id: string;
+}
+
 export type Block =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string }
@@ -20,11 +25,29 @@ export interface SlashCommand {
   source: "builtin" | "extension" | "skill" | "prompt";
 }
 
+export interface FileSuggestion {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+}
+
+// Pending @-mention file-search RPCs keyed by requestId. The bridge resolves
+// these when it receives `pi:files_result`. Module-scoped (not in store
+// state) since promises are not serializable.
+const pendingFileSearches = new Map<string, (items: FileSuggestion[]) => void>();
+
+export function _resolveFileSearch(requestId: string, items: FileSuggestion[]) {
+  const resolve = pendingFileSearches.get(requestId);
+  if (!resolve) return;
+  pendingFileSearches.delete(requestId);
+  resolve(items);
+}
+
 interface PiState {
   isReady: boolean;
   messages: Message[];
   isStreaming: boolean;
-  model: string | null;
+  model: ModelInfo | null;
   error: string | null;
   connectionError: string | null;
   cwd: string | null;
@@ -34,13 +57,14 @@ interface PiState {
 interface PiActions {
   sendPrompt: (text: string) => void;
   abort: () => void;
+  searchFiles: (query: string) => Promise<FileSuggestion[]>;
   retryConnect: () => void;
   _setReady: (cwd?: string) => void;
   _addMessage: (msg: Message) => void;
   _updateAssistantBlocks: (id: string, blocks: Block[]) => void;
   _finalizeMessage: (msg: Message) => void;
   _setStreaming: (v: boolean) => void;
-  _setModel: (model: string | null) => void;
+  _setModel: (model: ModelInfo | null) => void;
   _setError: (err: string | null) => void;
   _setConnectionError: (err: string | null) => void;
   _addNotice: (text: string, isError?: boolean) => void;
@@ -91,6 +115,27 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
 
   abort: () => {
     Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "abort" });
+  },
+
+  searchFiles: (query) => {
+    if (typeof Neutralino === "undefined") return Promise.resolve([]);
+    const requestId = crypto.randomUUID();
+    return new Promise<FileSuggestion[]>((resolve) => {
+      pendingFileSearches.set(requestId, resolve);
+      // Timeout so abandoned requests don't leak. 4s is generous for a
+      // local walk; if it exceeds that the popup just stays empty.
+      setTimeout(() => {
+        if (pendingFileSearches.delete(requestId)) resolve([]);
+      }, 4000);
+      Neutralino!.extensions
+        .dispatch("pi-backend", "pi:input", {
+          type: "searchFiles",
+          payload: { requestId, query },
+        })
+        .catch(() => {
+          if (pendingFileSearches.delete(requestId)) resolve([]);
+        });
+    });
   },
 
   retryConnect: () => {

@@ -5,6 +5,7 @@
 
 import { createPiSession } from "./pi-bridge.js";
 import { startExtensionWatcher } from "./extension-watcher.js";
+import { searchFiles } from "./file-search.js";
 import * as fs from "node:fs";
 
 // ── Read connection info from stdin (Neutralino sends it at spawn) ──
@@ -156,6 +157,10 @@ const builtins = {
       : available.find((m) => m.id === id);
     if (!found) return { text: `Model not found: ${trimmed}`, isError: true };
     await session.setModel(found);
+    // Notify webview of the model change
+    broadcastToApp("pi:model", {
+      model: { provider: found.provider, id: found.id },
+    }).catch(() => {});
     return { text: `Model → ${found.provider}:${found.id}` };
   },
 
@@ -335,6 +340,18 @@ async function handleWebviewInput(data) {
       }
     } else if (type === "abort") {
       session.abort();
+    } else if (type === "searchFiles") {
+      // Composer @-mention autocomplete. Stateless lookup: walk cwd, score,
+      // return the top N items keyed by the caller's requestId.
+      const requestId = payload?.requestId;
+      const query = typeof payload?.query === "string" ? payload.query : "";
+      let items = [];
+      try {
+        items = searchFiles(query, process.cwd());
+      } catch (err) {
+        log(`searchFiles failed: ${err.message}`, "ERROR");
+      }
+      await broadcastToApp("pi:files_result", { requestId, items });
     }
   } catch (err) {
     await broadcastToApp("pi:notice", {
@@ -365,6 +382,12 @@ ws.addEventListener("open", async () => {
 
     // Signal webview that Pi is ready
     await broadcastToApp("pi:ready", { cwd: process.cwd() });
+    // Send current model info
+    if (session.model) {
+      await broadcastToApp("pi:model", {
+        model: { provider: session.model.provider, id: session.model.id },
+      });
+    }
     await broadcastCommands();
     log("Pi GUI ready");
   } catch (err) {
@@ -406,7 +429,14 @@ ws.addEventListener("message", (event) => {
       broadcastToApp("pi:ready", { cwd: process.cwd() }).catch((e) =>
         log(`Rebroadcast ready failed: ${e.message}`, "ERROR")
       );
-      if (session) broadcastCommands();
+      if (session) {
+        if (session.model) {
+          broadcastToApp("pi:model", {
+            model: { provider: session.model.provider, id: session.model.id },
+          }).catch(() => {});
+        }
+        broadcastCommands();
+      }
     }
   } catch (err) {
     log(`Message parse error: ${err.message}`, "ERROR");

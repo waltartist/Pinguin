@@ -1,7 +1,27 @@
-import { useState, useRef, useEffect, useMemo, KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent } from "react";
 import { usePi } from "../lib/use-pi";
-import type { SlashCommand } from "../stores/pi-store";
+import type { SlashCommand, FileSuggestion } from "../stores/pi-store";
 import { Icon } from "./ember";
+
+// Same delimiter set as pi-tui's CombinedAutocompleteProvider. The @-token
+// extends from the cursor back to the most recent delimiter — so "look at
+// @src/" treats `@src/` as the active prefix.
+const AT_DELIMITERS = new Set([" ", "\t", "\n", '"', "'", "="]);
+
+interface AtPrefix {
+  query: string; // text after the `@`, may be empty
+  start: number; // index of the `@` in the textarea value
+  end: number;   // cursor position
+}
+
+function findAtPrefix(text: string, caret: number): AtPrefix | null {
+  // Walk back from caret to the nearest delimiter (or start of string).
+  let i = caret - 1;
+  while (i >= 0 && !AT_DELIMITERS.has(text[i]!)) i--;
+  const tokenStart = i + 1;
+  if (text[tokenStart] !== "@") return null;
+  return { query: text.slice(tokenStart + 1, caret), start: tokenStart, end: caret };
+}
 
 export function Composer() {
   const isReady = usePi((s) => s.isReady);
@@ -11,14 +31,14 @@ export function Composer() {
   const abort = usePi((s) => s.abort);
   const model = usePi((s) => s.model);
   const commands = usePi((s) => s.commands);
+  const searchFiles = usePi((s) => s.searchFiles);
 
   const [input, setInput] = useState("");
+  const [caret, setCaret] = useState(0);
   const [slashIdx, setSlashIdx] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Slash autocomplete. Active when the input starts with `/` and the
-  // first token hasn't been closed by a space — i.e. we're still picking
-  // a command name. Once a space appears we're typing arguments.
+  // ── Slash autocomplete (existing) ───────────────────────────────
   const slashQuery = useMemo<string | null>(() => {
     if (!input.startsWith("/")) return null;
     const firstSpace = input.indexOf(" ");
@@ -43,11 +63,80 @@ export function Composer() {
     textareaRef.current?.focus();
   };
 
+  // ── @-mention file autocomplete ─────────────────────────────────
+  // Recompute prefix from textarea value + caret on every input/select event.
+  const atPrefix = useMemo<AtPrefix | null>(() => {
+    if (slashOpen) return null; // slash popup wins
+    return findAtPrefix(input, caret);
+  }, [input, caret, slashOpen]);
+
+  const [atItems, setAtItems] = useState<FileSuggestion[]>([]);
+  const [atIdx, setAtIdx] = useState(0);
+  const atReqRef = useRef(0);
+
+  useEffect(() => {
+    if (atPrefix === null) {
+      setAtItems([]);
+      return;
+    }
+    // Debounce so each keystroke doesn't fire a backend walk.
+    const myReq = ++atReqRef.current;
+    const handle = setTimeout(async () => {
+      const items = await searchFiles(atPrefix.query);
+      // Drop stale results — only the latest request wins.
+      if (myReq !== atReqRef.current) return;
+      setAtItems(items);
+      setAtIdx(0);
+    }, 80);
+    return () => clearTimeout(handle);
+  }, [atPrefix?.query, atPrefix === null, searchFiles]);
+
+  const atOpen = atPrefix !== null && atItems.length > 0;
+
+  const acceptAt = useCallback(
+    (item: FileSuggestion) => {
+      if (!atPrefix) return;
+      // Directories: insert without trailing space so the user can keep
+      // drilling in (matches pi-tui behavior).
+      const inserted = item.isDirectory ? `@${item.path}/` : `@${item.path} `;
+      const before = input.slice(0, atPrefix.start);
+      const after = input.slice(atPrefix.end);
+      const next = before + inserted + after;
+      const nextCaret = atPrefix.start + inserted.length;
+      setInput(next);
+      // Restore caret after React commits the new value.
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(nextCaret, nextCaret);
+        setCaret(nextCaret);
+      });
+    },
+    [atPrefix, input]
+  );
+
+  // ── Input handling ──────────────────────────────────────────────
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    setCaret(e.target.selectionStart ?? e.target.value.length);
+  };
+
+  // Caret can move without value changing (arrow keys, click). Refresh state
+  // so the @-prefix detector stays in sync.
+  const syncCaret = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart ?? 0;
+    if (pos !== caret) setCaret(pos);
+  };
+
   const handleSend = () => {
     const text = input.trim();
     if (!text || isStreaming) return;
     sendPrompt(text);
     setInput("");
+    setCaret(0);
     textareaRef.current?.focus();
   };
 
@@ -75,6 +164,30 @@ export function Composer() {
         return;
       }
     }
+    if (atOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setAtIdx((i) => Math.min(i + 1, atItems.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setAtIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        const chosen = atItems[atIdx];
+        if (chosen) acceptAt(chosen);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        // Close the popup but keep what the user has typed.
+        setAtItems([]);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -92,14 +205,25 @@ export function Composer() {
           onHoverIdx={setSlashIdx}
         />
       )}
+      {atOpen && (
+        <FilePopup
+          items={atItems}
+          activeIdx={atIdx}
+          onPick={acceptAt}
+          onHoverIdx={setAtIdx}
+        />
+      )}
       <div className="composer-row">
         <textarea
           ref={textareaRef}
           className="composer-input"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleChange}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
+          onSelect={syncCaret}
           onKeyDown={handleKeyDown}
-          placeholder={isReady ? "Ask Pi…" : "Starting Pi…"}
+          placeholder={isReady ? "Ask Pi…  (type @ to attach files)" : "Starting Pi…"}
           disabled={!isReady}
           rows={1}
         />
@@ -128,7 +252,10 @@ export function Composer() {
             paddingLeft: 2,
           }}
         >
-          <span className="btn-chip">{model}</span>
+          <span className="btn-chip">
+            <span className="status-dim">{model.provider}:</span>
+            {model.id}
+          </span>
         </div>
       )}
     </div>
@@ -143,7 +270,6 @@ interface SlashPopupProps {
 }
 
 function SlashPopup({ commands, activeIdx, onPick, onHoverIdx }: SlashPopupProps) {
-  // Scroll active item into view when arrow keys move the cursor.
   const activeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "nearest" });
@@ -173,6 +299,50 @@ function SlashPopup({ commands, activeIdx, onPick, onHoverIdx }: SlashPopupProps
             )}
             {c.source !== "builtin" && (
               <span className="composer-slash-source">{c.source}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+interface FilePopupProps {
+  items: FileSuggestion[];
+  activeIdx: number;
+  onPick: (item: FileSuggestion) => void;
+  onHoverIdx: (idx: number) => void;
+}
+
+function FilePopup({ items, activeIdx, onPick, onHoverIdx }: FilePopupProps) {
+  const activeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx]);
+
+  return (
+    <div className="composer-slash composer-at" role="listbox">
+      {items.map((item, i) => {
+        const active = i === activeIdx;
+        const label = item.isDirectory ? `${item.name}/` : item.name;
+        return (
+          <div
+            key={item.path}
+            ref={active ? activeRef : undefined}
+            className={`composer-slash-item${active ? " composer-slash-item-active" : ""}`}
+            role="option"
+            aria-selected={active}
+            onMouseEnter={() => onHoverIdx(i)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPick(item);
+            }}
+          >
+            <span className="composer-slash-arrow">{active ? "→" : " "}</span>
+            <span className="composer-slash-name">{label}</span>
+            <span className="composer-slash-desc">{item.path}</span>
+            {item.isDirectory && (
+              <span className="composer-slash-source">dir</span>
             )}
           </div>
         );
