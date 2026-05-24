@@ -1,8 +1,3 @@
-- When user asks you to create a view.
-
-
-
-
 # Pi GUI
 
 Desktop GUI for the Pi coding agent. Neutralinojs shell, React webview,

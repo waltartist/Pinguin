@@ -27,6 +27,28 @@ const LAYOUT_KEY = "pi_gui_dock_layout";
 const CLOSED_KEY = "pi_gui_dock_closed_panels";
 const EXTENSION_ID_PREFIX = "ext-";
 
+// Fallback file path for layout persistence — written via filesystem API
+// when Neutralino.storage fails. This is a known path we can verify.
+const LAYOUT_FILE = ".tmp/dock_layout.json";
+
+// ── Direct filesystem helpers (bypass Neutralino.storage) ──
+async function fsWrite(path: string, data: string): Promise<void> {
+  try {
+    if (typeof Neutralino !== "undefined" && (Neutralino as any).filesystem?.writeFile) {
+      await (Neutralino as any).filesystem.writeFile(path, data);
+      return;
+    }
+  } catch { /* ignore */ }
+}
+async function fsRead(path: string): Promise<string | null> {
+  try {
+    if (typeof Neutralino !== "undefined" && (Neutralino as any).filesystem?.readFile) {
+      return await (Neutralino as any).filesystem.readFile(path);
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 // Async-loaded persisted state. Read from Neutralino.storage on boot;
 // localStorage is a dev-only fallback. closedPanels survives reload so
 // auto-add paths (extension hot-load, default layout) don't resurrect
@@ -54,6 +76,15 @@ async function nlGet(key: string): Promise<string | null> {
 }
 
 async function nlSet(key: string, value: string): Promise<void> {
+  // Always write to localStorage (synchronous, always completes even on
+  // beforeunload). This is the primary persistence mechanism for shutdown.
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore — no persistence available
+  }
+  // Neutralino.storage is async; fire-and-forget so the caller isn't blocked.
+  // The synchronous localStorage write above guarantees the data survives.
   try {
     if (
       typeof Neutralino !== "undefined" &&
@@ -65,25 +96,41 @@ async function nlSet(key: string, value: string): Promise<void> {
   } catch (err) {
     console.warn(`storage write failed for ${key}`, err);
   }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore — no persistence available
-  }
 }
 
 export async function loadDockStorage(): Promise<void> {
   if (storageReady) return;
+
+  // Try in order:
+  //   1. Neutralino.storage (async, may fail on cold start)
+  //   2. localStorage (sync, but may be cleared by Neutralino webview)
+  //   3. filesystem file in .tmp/ (direct file I/O via Neutralino API)
   const [layoutRaw, closedRaw] = await Promise.all([
-    nlGet(LAYOUT_KEY),
-    nlGet(CLOSED_KEY),
+    (async () => {
+      const v = await nlGet(LAYOUT_KEY);
+      if (v) return v;
+      const ls = localStorage.getItem(LAYOUT_KEY);
+      if (ls) return ls;
+      // Final fallback: direct filesystem read
+      return await fsRead(LAYOUT_FILE);
+    })(),
+    (async () => {
+      const v = await nlGet(CLOSED_KEY);
+      if (v) return v;
+      const ls = localStorage.getItem(CLOSED_KEY);
+      if (ls) return ls;
+      return null;  // closed panels not saved to file
+    })(),
   ]);
+
   if (layoutRaw) {
     try {
       loadedLayout = JSON.parse(layoutRaw);
-    } catch {
+    } catch (e) {
       loadedLayout = null;
     }
+  } else {
+    loadedLayout = null;
   }
   if (closedRaw) {
     try {
@@ -97,7 +144,11 @@ export async function loadDockStorage(): Promise<void> {
 }
 
 function saveClosed() {
-  void nlSet(CLOSED_KEY, JSON.stringify([...closedPanels]));
+  const data = JSON.stringify([...closedPanels]);
+  // Fire-and-forget for Neutralino async RPC; synchronous localStorage
+  // guarantees the write completes even on beforeunload.
+  nlSet(CLOSED_KEY, data);
+  try { localStorage.setItem(CLOSED_KEY, data); } catch { /* ignore */ }
 }
 
 function markClosed(id: string) {
@@ -181,7 +232,7 @@ const BUILTIN_PANELS: BuiltinPanelDef[] = [
 let dockApi: DockviewApi | null = null;
 const pendingExtensions: { id: string; title: string; iconKey?: IconKey }[] =
   [];
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+// No debounce timer needed — persist() saves eagerly on every change.
 
 function extensionPanelId(id: string) {
   return EXTENSION_ID_PREFIX + id;
@@ -273,24 +324,33 @@ function addBuiltinPanel(
 }
 
 function persist(api: DockviewApi) {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      const json = api.toJSON();
-      void nlSet(LAYOUT_KEY, JSON.stringify(json));
-    } catch (err) {
-      console.warn("dock layout save failed", err);
+  // Save eagerly on every layout change — no debounce. The Neutralino
+  // storage RPC is async but we also write to localStorage synchronously,
+  // guaranteeing the layout survives beforeunload / windowClose.
+  try {
+    const json = api.toJSON();
+    const data = JSON.stringify(json);
+    if (!data) {
+      return;  // guard against undefined/null serialization
     }
-  }, 300);
+    // Write to all three backends:
+    nlSet(LAYOUT_KEY, data);
+    try { localStorage.setItem(LAYOUT_KEY, data); } catch { /* ignore */ }
+    fsWrite(LAYOUT_FILE, data);  // fire-and-forget, no await needed
+  } catch (err) {
+    console.warn("dock layout save failed", err);
+  }
 }
 
 function tryRestoreLayout(api: DockviewApi): boolean {
   const parsed = loadedLayout;
+  console.log('[dock] tryRestoreLayout: parsed=', parsed ? `type=${typeof parsed}, hasGrid=${'grid' in (parsed as any)}` : 'null');
   if (
     !parsed ||
     typeof parsed !== "object" ||
     !("grid" in (parsed as Record<string, unknown>))
   ) {
+    console.log('[dock] tryRestoreLayout: invalid or missing layout data, using default');
     loadedLayout = null;
     return false;
   }
@@ -299,9 +359,11 @@ function tryRestoreLayout(api: DockviewApi): boolean {
     // Restored an empty layout (user closed everything) — fall back to default
     // so the window isn't just a watermark on next launch.
     if (api.panels.length === 0) {
+      console.log('[dock] tryRestoreLayout: restored empty layout, using default');
       api.clear();
       return false;
     }
+    console.log(`[dock] tryRestoreLayout: SUCCESS — ${api.panels.length} panels restored`);
     return true;
   } catch (err) {
     console.warn("dock layout restore failed, falling back to default", err);
@@ -476,9 +538,9 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
 }
 
 export function Shell() {
-  const initialized = useRef(false);
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [storageLoaded, setStorageLoaded] = useState(storageReady);
+  const [layoutDebug, setLayoutDebug] = useState("");
   const openFile = useFileViewStore((s) => s.openFile);
 
   useEffect(() => {
@@ -490,18 +552,44 @@ export function Shell() {
     dockApi = event.api;
     setApi(event.api);
 
-    if (!initialized.current) {
-      initialized.current = true;
-      const restored = tryRestoreLayout(event.api);
-      if (!restored) buildDefaultLayout(event.api);
+    // ── Register persist handler BEFORE any layout mutations ──
+    // buildDefaultLayout → addPanel fires onDidLayoutChange synchonously
+    // during the same call stack. If we register after, the first save is
+    // missed and the .neustorage file stays 0 bytes on disk.
+    event.api.onDidLayoutChange(() => persist(event.api));
 
-      while (pendingExtensions.length) {
-        const ext = pendingExtensions.shift()!;
-        addExtensionPanel(ext.id, ext.title, ext.iconKey);
+    // NOTE: No `initialized` guard. React Strict Mode double-mounts in
+    // development — the first mount's Dockview instance is destroyed on
+    // unmount, but `useRef` is preserved across remount. If we skipped
+    // setup on the second onReady, the new Dockview instance would have
+    // zero panels → empty window.
+    //
+    // Both tryRestoreLayout and buildDefaultLayout are idempotent:
+    // fromJSON replaces the grid; addBuiltinPanel checks getPanel() first.
+
+    const restored = tryRestoreLayout(event.api);
+    if (!restored) {
+      // Only build default if dock is empty (no panels at all)
+      if (event.api.panels.length === 0) {
+        setLayoutDebug('No saved layout — using default');
+        buildDefaultLayout(event.api);
+      } else {
+        setLayoutDebug(`Layout already active (${event.api.panels.length} panels)`);
       }
+    } else {
+      setLayoutDebug(`Layout restored: ${event.api.panels.length} panels`);
     }
 
-    event.api.onDidLayoutChange(() => persist(event.api));
+    // Belt-and-suspenders: persist the initial state immediately after
+    // layout setup, so even if onDidLayoutChange wasn't dispatched we
+    // have a saved snapshot.
+    persist(event.api);
+
+    // Register extension panels that were queued before onReady
+    while (pendingExtensions.length) {
+      const ext = pendingExtensions.shift()!;
+      addExtensionPanel(ext.id, ext.title, ext.iconKey);
+    }
 
     event.api.onDidRemovePanel((panel) => {
       markClosed(panel.id);
@@ -562,12 +650,15 @@ export function Shell() {
     });
 
     const flush = () => {
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
-      }
       try {
-        void nlSet(LAYOUT_KEY, JSON.stringify(event.api.toJSON()));
+        const json = event.api.toJSON();
+        const data = JSON.stringify(json);
+        if (!data) return;
+        // localStorage is synchronous — guaranteed to complete on shutdown.
+        try { localStorage.setItem(LAYOUT_KEY, data); } catch { /* ignore */ }
+        // Async backends: fire-and-forget
+        nlSet(LAYOUT_KEY, data);
+        fsWrite(LAYOUT_FILE, data);
       } catch (err) {
         console.warn("dock layout flush failed", err);
       }
@@ -613,7 +704,11 @@ export function Shell() {
   }, [openFile]);
 
   if (!storageLoaded) {
-    return <div className="pi-dock-shell" />;
+    return (
+      <div className="pi-dock-shell pi-dock-shell--loading">
+        <div className="pi-dock-debug">{layoutDebug || 'Loading layout...'}</div>
+      </div>
+    );
   }
 
   return (
@@ -626,6 +721,9 @@ export function Shell() {
         className="pi-dock-root"
       />
       <PanelMenu api={api} />
+      {layoutDebug && (
+        <div className="pi-dock-debug">{layoutDebug}</div>
+      )}
     </div>
   );
 }

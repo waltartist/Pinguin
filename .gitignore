@@ -4,5 +4,6 @@ dist/
 .tmp/
 .storage/
 nul
-.DS_Store
+bin_*.txt
 *.log
+.DS_Store

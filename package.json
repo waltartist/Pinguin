@@ -9,7 +9,8 @@
     "dev:webview:build-watch": "vite build --watch",
     "dev:backend": "node src/backend/main.js",
     "dev": "concurrently \"npm run dev:webview\" \"npm run dev:backend\"",
-    "dev:all": "concurrently --kill-others \"npm run dev:webview\" \"neu run\"",
+    "dev:all": "npx @neutralinojs/neu run",
+    "dev:all-legacy": "concurrently --kill-others \"npm run dev:webview\" \"neu run\"",
     "build:webview": "vite build",
     "build": "npm run build:webview && neu build",
     "start": "neu run"

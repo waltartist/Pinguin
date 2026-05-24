@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "defaultMode": "window",
   "port": 0,
-  "url": "http://localhost:5173",
+  "url": "/",
   "documentRoot": "/resources/",
   "enableServer": true,
   "enableNativeAPI": true,
   "enableExtensions": true,
+  "exportAuthInfo": true,
   "nativeBlockList": [],
   "extensions": [
     {
@@ -29,6 +30,14 @@
     "binaryName": "pi-gui",
     "resourcesPath": "/resources/",
     "extensionsPath": "/extensions/",
-    "binaryVersion": "6.7.0"
+    "clientLibrary": "/resources/neutralino.js",
+    "binaryVersion": "6.7.0",
+    "frontendLibrary": {
+      "patchFile": "/index.html",
+      "devUrl": "http://localhost:5173",
+      "devCommand": "npm run dev:webview",
+      "buildCommand": "npm run build:webview",
+      "projectPath": "."
+    }
   }
 }
