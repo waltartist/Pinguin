@@ -5,7 +5,7 @@
 import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
-import { installStyleGuide } from "./style-guide-installer.js";
+import { installExtensionDocs } from "./extension-docs-installer.js";
 
 // Path to the globally installed Pi SDK
 const PI_SDK_DIR = path.join(
@@ -19,9 +19,8 @@ const PI_SDK_DIR = path.join(
 const piIndex = pathToFileURL(path.join(PI_SDK_DIR, "dist", "index.js")).href;
 
 export async function createPiSession() {
-  // Sync the Ember style guide + agent instructions into ~/.pi/agent/
-  // before the session reads its agent dir.
-  installStyleGuide();
+  // Sync extension docs/types into project-local gui-extensions/
+  installExtensionDocs();
 
   const { createAgentSession } = await import(piIndex);
 

@@ -139,6 +139,11 @@ function initBridge() {
     const cwd = raw?.detail?.cwd || raw?.cwd;
     console.log("[pi-gui] Received pi:ready — UI unlocked, cwd:", cwd);
     usePiStore.getState()._setReady(cwd);
+    // Extract session stats embedded in the ready payload
+    const stats = raw?.detail?.stats;
+    if (stats && typeof stats === "object") {
+      usePiStore.getState()._setSessionStats(stats);
+    }
   });
 
   Neutralino.events.on("pi:model", (raw: any) => {
@@ -170,6 +175,8 @@ function initBridge() {
     const cwd = raw?.detail?.cwd;
     usePiStore.getState()._resetMessages();
     if (typeof cwd === "string") usePiStore.getState()._setReady(cwd);
+    // Reset session stats on /new
+    usePiStore.getState()._setSessionStats(null);
   });
 
   Neutralino.events.on("pi:files_result", (raw: any) => {
@@ -183,6 +190,18 @@ function initBridge() {
   Neutralino.events.on("pi:commands", (raw: any) => {
     const list = raw?.detail?.commands;
     if (Array.isArray(list)) usePiStore.getState()._setCommands(list);
+  });
+
+  Neutralino.events.on("pi:models", (raw: any) => {
+    const list = raw?.detail?.models;
+    if (Array.isArray(list)) usePiStore.getState()._setAvailableModels(list);
+  });
+
+  Neutralino.events.on("pi:stats", (raw: any) => {
+    const stats = raw?.detail?.stats;
+    if (stats && typeof stats === "object") {
+      usePiStore.getState()._setSessionStats(stats);
+    }
   });
 
   // ── Retry / fallback: if still not ready, re-request state ──

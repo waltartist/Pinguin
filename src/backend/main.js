@@ -6,6 +6,7 @@
 import { createPiSession } from "./pi-bridge.js";
 import { startExtensionWatcher } from "./extension-watcher.js";
 import { searchFiles } from "./file-search.js";
+import { createBuiltinRegistry } from "./builtins.js";
 import * as fs from "node:fs";
 
 // ── Read connection info from stdin (Neutralino sends it at spawn) ──
@@ -48,200 +49,26 @@ function broadcastToApp(event, data) {
 let session = null;
 let sessionUnsub = null;
 
+const registry = createBuiltinRegistry({
+  broadcast: broadcastToApp,
+  callMethod,
+  broadcastCommands,
+});
+
 function subscribeSession() {
   sessionUnsub = session.subscribe((event) => {
     broadcastToApp("pi:event", event).catch((e) =>
       log(`Broadcast failed: ${e.message}`, "ERROR")
     );
+    // Broadcast session stats after agent completes a turn
+    if (event.type === "agent_end" || event.type === "message_end") {
+      broadcastSessionStats();
+    }
   });
 }
 
-// ── Built-in slash commands ───────────────────────────────────────
-// Pi's CLI handles these directly; the SDK does not. Reimplement here so
-// the GUI exposes the same vocabulary.
-
-const builtinDescriptions = {
-  new: "Start a new session",
-  compact: "Manually compact the session context",
-  reload: "Reload extensions, skills, prompts, themes",
-  export: "Export session (HTML default, or specify path: .html/.jsonl)",
-  copy: "Copy last agent message to clipboard",
-  name: "Set session display name",
-  session: "Show session info and stats",
-  quit: "Quit Pi GUI",
-  model: "Show or switch model",
-  "scoped-models": "Show scoped models",
-  settings: "Show settings",
-  hotkeys: "Show all keyboard shortcuts",
-  changelog: "Show Pi SDK changelog",
-};
-
-const builtins = {
-  async new() {
-    if (sessionUnsub) sessionUnsub();
-    session = await createPiSession();
-    subscribeSession();
-    await broadcastToApp("pi:reset", { cwd: process.cwd() });
-    await broadcastCommands();
-    return { text: "New session started." };
-  },
-
-  async compact(args) {
-    await session.compact(args || undefined);
-    return { text: "Context compacted." };
-  },
-
-  async reload() {
-    await session.reload();
-    await broadcastCommands();
-    return { text: "Reloaded extensions, skills, prompts, themes." };
-  },
-
-  async export(args) {
-    const trimmed = args?.trim();
-    const path = trimmed && trimmed.endsWith(".jsonl")
-      ? session.exportToJsonl(trimmed)
-      : await session.exportToHtml(trimmed || undefined);
-    return { text: `Exported session → ${path}` };
-  },
-
-  async copy() {
-    const text = session.getLastAssistantText();
-    if (!text) return { text: "No assistant message to copy.", isError: true };
-    await callMethod("clipboard.writeText", { data: text });
-    return { text: "Copied last assistant message." };
-  },
-
-  async name(args) {
-    if (!args) return { text: "Usage: /name <session name>", isError: true };
-    session.setSessionName(args);
-    return { text: `Session named: ${args}` };
-  },
-
-  async session() {
-    const stats = session.getSessionStats();
-    return { text: formatStats(stats) };
-  },
-
-  async quit() {
-    // Allow the notice to flush before exit.
-    setTimeout(() => callMethod("app.exit", {}).catch(() => {}), 100);
-    return { text: "Exiting…" };
-  },
-
-  async model(args) {
-    const trimmed = args?.trim();
-    const available = session.modelRegistry.getAvailable();
-    if (!trimmed) {
-      const current = session.model;
-      const lines = ["Available models:"];
-      for (const m of available) {
-        const mark = current && m.provider === current.provider && m.id === current.id ? "* " : "  ";
-        lines.push(`${mark}${m.provider}:${m.id}${m.name ? ` — ${m.name}` : ""}`);
-      }
-      lines.push("");
-      lines.push("Switch: /model <provider>:<id>  or  /model <id>");
-      return { text: lines.join("\n") };
-    }
-    let provider;
-    let id;
-    if (trimmed.includes(":")) {
-      const idx = trimmed.indexOf(":");
-      provider = trimmed.slice(0, idx);
-      id = trimmed.slice(idx + 1);
-    } else {
-      id = trimmed;
-    }
-    const found = provider
-      ? available.find((m) => m.provider === provider && m.id === id)
-      : available.find((m) => m.id === id);
-    if (!found) return { text: `Model not found: ${trimmed}`, isError: true };
-    await session.setModel(found);
-    // Notify webview of the model change
-    broadcastToApp("pi:model", {
-      model: { provider: found.provider, id: found.id },
-    }).catch(() => {});
-    return { text: `Model → ${found.provider}:${found.id}` };
-  },
-
-  async "scoped-models"() {
-    const scoped = session.scopedModels;
-    if (!scoped || scoped.length === 0) {
-      return { text: "No scoped models configured." };
-    }
-    const lines = ["Scoped models:"];
-    for (const s of scoped) {
-      const lvl = s.thinkingLevel ? ` (${s.thinkingLevel})` : "";
-      lines.push(`  ${s.model.provider}:${s.model.id}${lvl}`);
-    }
-    return { text: lines.join("\n") };
-  },
-
-  async settings() {
-    const model = session.model;
-    const lines = [
-      `model: ${model ? `${model.provider}:${model.id}` : "(none)"}`,
-      `thinkingLevel: ${session.thinkingLevel}`,
-      `steeringMode: ${session.steeringMode}`,
-      `followUpMode: ${session.followUpMode}`,
-      `autoCompactionEnabled: ${session.autoCompactionEnabled}`,
-      `sessionId: ${session.sessionId}`,
-      `sessionName: ${session.sessionName || "(none)"}`,
-    ];
-    return { text: lines.join("\n") };
-  },
-
-  async hotkeys() {
-    return {
-      text: [
-        "Composer:",
-        "  Enter           Send",
-        "  Shift+Enter     Newline",
-        "",
-        "Slash commands:",
-        "  /new                  Start new session",
-        "  /compact [hint]       Manually compact context",
-        "  /reload               Reload extensions/skills/prompts/themes",
-        "  /export [path]        Export session (HTML or .jsonl)",
-        "  /copy                 Copy last assistant message",
-        "  /name <name>          Name session",
-        "  /session              Session stats",
-        "  /model [provider:id]  Show or switch model",
-        "  /scoped-models        Show scoped models",
-        "  /settings             Show settings",
-        "  /hotkeys              This list",
-        "  /changelog            Show Pi SDK changelog",
-        "  /quit                 Exit",
-      ].join("\n"),
-    };
-  },
-
-  async changelog() {
-    try {
-      const { readFile } = await import("node:fs/promises");
-      const pathMod = await import("node:path");
-      const osMod = await import("node:os");
-      const sdkDir = pathMod.join(
-        process.env.APPDATA || pathMod.join(osMod.homedir(), ".npm-global"),
-        "npm",
-        "node_modules",
-        "@earendil-works",
-        "pi-coding-agent"
-      );
-      const content = await readFile(pathMod.join(sdkDir, "CHANGELOG.md"), "utf-8");
-      const lines = content.split("\n").slice(0, 80);
-      return { text: lines.join("\n") };
-    } catch (err) {
-      return { text: `Changelog unavailable: ${err.message || err}`, isError: true };
-    }
-  },
-};
-
 function listCommands() {
-  const out = [];
-  for (const [name, desc] of Object.entries(builtinDescriptions)) {
-    out.push({ name, description: desc, source: "builtin" });
-  }
+  const out = registry.list();
   if (!session) return out;
   try {
     for (const c of session.extensionRunner.getRegisteredCommands()) {
@@ -281,13 +108,58 @@ function broadcastCommands() {
   );
 }
 
-function formatStats(stats) {
-  const lines = [];
-  for (const [k, v] of Object.entries(stats)) {
-    const val = v && typeof v === "object" ? JSON.stringify(v) : v;
-    lines.push(`${k}: ${val}`);
+function getAvailableModels() {
+  if (!session) return [];
+  try {
+    return session.modelRegistry.getAvailable().map((m) => ({
+      provider: m.provider,
+      id: m.id,
+      name: m.name,
+      contextWindow: m.contextWindow,
+      maxTokens: m.maxTokens,
+      reasoning: m.reasoning,
+      input: m.input,
+    }));
+  } catch (err) {
+    log(`getAvailableModels: ${err.message}`, "ERROR");
+    return [];
   }
-  return lines.join("\n");
+}
+
+function broadcastModels() {
+  return broadcastToApp("pi:models", { models: getAvailableModels() }).catch((e) =>
+    log(`Broadcast models failed: ${e.message}`, "ERROR")
+  );
+}
+
+function broadcastSessionStats() {
+  if (!session) return;
+  try {
+    const stats = session.getSessionStats();
+    broadcastToApp("pi:stats", {
+      stats: {
+        sessionId: stats.sessionId,
+        sessionName: session.sessionName || null,
+        sessionFile: stats.sessionFile || null,
+        userMessages: stats.userMessages,
+        assistantMessages: stats.assistantMessages,
+        toolCalls: stats.toolCalls,
+        toolResults: stats.toolResults,
+        totalMessages: stats.totalMessages,
+        tokens: {
+          input: stats.tokens.input,
+          output: stats.tokens.output,
+          cacheRead: stats.tokens.cacheRead,
+          cacheWrite: stats.tokens.cacheWrite,
+          total: stats.tokens.total,
+        },
+        cost: stats.cost,
+        contextUsage: stats.contextUsage || null,
+      },
+    }).catch((e) => log(`Broadcast stats failed: ${e.message}`, "ERROR"));
+  } catch (err) {
+    log(`getSessionStats failed: ${err.message}`, "ERROR");
+  }
 }
 
 function parseCommand(text) {
@@ -299,20 +171,26 @@ function parseCommand(text) {
 
 async function tryBuiltin(text) {
   const { name, args } = parseCommand(text);
-  const handler = builtins[name];
-  if (!handler) return false;
-  try {
-    const result = await handler(args);
-    if (result?.text) {
-      await broadcastToApp("pi:notice", {
-        text: result.text,
-        isError: !!result.isError,
-      });
-    }
-  } catch (err) {
+  const result = await registry.run(name, args, () => session);
+  if (result === null) return false;
+
+  if (result?._recreateSession) {
+    if (sessionUnsub) sessionUnsub();
+    session = result._recreateSession;
+    subscribeSession();
+    await broadcastToApp("pi:reset", { cwd: process.cwd() });
+    await broadcastCommands();
+    broadcastSessionStats();
+  }
+
+  if (result?.event) {
+    await broadcastToApp(result.event, result.eventData || {});
+  }
+
+  if (result?.text) {
     await broadcastToApp("pi:notice", {
-      text: `/${name}: ${err.message || err}`,
-      isError: true,
+      text: result.text,
+      isError: !!result.isError,
     });
   }
   return true;
@@ -352,6 +230,8 @@ async function handleWebviewInput(data) {
         log(`searchFiles failed: ${err.message}`, "ERROR");
       }
       await broadcastToApp("pi:files_result", { requestId, items });
+    } else if (type === "getStats") {
+      broadcastSessionStats();
     }
   } catch (err) {
     await broadcastToApp("pi:notice", {
@@ -361,6 +241,11 @@ async function handleWebviewInput(data) {
     await broadcastToApp("pi:command_done", {});
   }
 }
+
+// ── Input queue: serialize pi:input messages so that commands
+//    (/model, /new, etc.) always complete before the next prompt
+//    is dispatched to the session.
+let inputQueue = Promise.resolve();
 
 // ── WebSocket event handlers ──
 
@@ -380,8 +265,36 @@ ws.addEventListener("open", async () => {
       events: { broadcast: (event, data) => broadcastToApp(event, data) },
     });
 
-    // Signal webview that Pi is ready
-    await broadcastToApp("pi:ready", { cwd: process.cwd() });
+    // Signal webview that Pi is ready — embed initial stats so the UI
+    // has them immediately without requiring a separate getStats request.
+    let initialStats = null;
+    try {
+      if (session) {
+        const s = session.getSessionStats();
+        initialStats = {
+          sessionId: s.sessionId,
+          sessionName: session.sessionName || null,
+          sessionFile: s.sessionFile || null,
+          userMessages: s.userMessages,
+          assistantMessages: s.assistantMessages,
+          toolCalls: s.toolCalls,
+          toolResults: s.toolResults,
+          totalMessages: s.totalMessages,
+          tokens: {
+            input: s.tokens.input,
+            output: s.tokens.output,
+            cacheRead: s.tokens.cacheRead,
+            cacheWrite: s.tokens.cacheWrite,
+            total: s.tokens.total,
+          },
+          cost: s.cost,
+          contextUsage: s.contextUsage || null,
+        };
+      }
+    } catch (err) {
+      log(`Initial stats failed: ${err.message}`, "ERROR");
+    }
+    await broadcastToApp("pi:ready", { cwd: process.cwd(), stats: initialStats });
     // Send current model info
     if (session.model) {
       await broadcastToApp("pi:model", {
@@ -389,6 +302,8 @@ ws.addEventListener("open", async () => {
       });
     }
     await broadcastCommands();
+    await broadcastModels();
+    broadcastSessionStats();
     log("Pi GUI ready");
   } catch (err) {
     log(`Fatal: ${err.message}`, "ERROR");
@@ -416,17 +331,49 @@ ws.addEventListener("message", (event) => {
       return;
     }
 
-    // Handle events from the webview (dispatched via extensions.dispatch)
+    // Handle events from the webview (dispatched via extensions.dispatch).
+    // Chain through inputQueue so commands complete before the next prompt
+    // reaches session.prompt().  Without this, a /model command and a
+    // user prompt can race inside the session, corrupting its state.
     if (msg.event === "pi:input") {
-      handleWebviewInput(msg.data).catch((err) =>
-        log(`handleWebviewInput failed: ${err.message}`, "ERROR")
-      );
+      inputQueue = inputQueue
+        .then(() => handleWebviewInput(msg.data))
+        .catch((err) =>
+          log(`handleWebviewInput failed: ${err.message}`, "ERROR")
+        );
     }
 
     // Webview just connected — rebroadcast current status
     if (msg.event === "pi:hello") {
-      log("Received pi:hello from webview — rebroadcasting pi:ready");
-      broadcastToApp("pi:ready", { cwd: process.cwd() }).catch((e) =>
+      log("Received pi:hello from webview — rebroadcasting pi:ready with stats");
+      let helloStats = null;
+      try {
+        if (session) {
+          const s = session.getSessionStats();
+          helloStats = {
+            sessionId: s.sessionId,
+            sessionName: session.sessionName || null,
+            sessionFile: s.sessionFile || null,
+            userMessages: s.userMessages,
+            assistantMessages: s.assistantMessages,
+            toolCalls: s.toolCalls,
+            toolResults: s.toolResults,
+            totalMessages: s.totalMessages,
+            tokens: {
+              input: s.tokens.input,
+              output: s.tokens.output,
+              cacheRead: s.tokens.cacheRead,
+              cacheWrite: s.tokens.cacheWrite,
+              total: s.tokens.total,
+            },
+            cost: s.cost,
+            contextUsage: s.contextUsage || null,
+          };
+        }
+      } catch (err) {
+        log(`Hello stats failed: ${err.message}`, "ERROR");
+      }
+      broadcastToApp("pi:ready", { cwd: process.cwd(), stats: helloStats }).catch((e) =>
         log(`Rebroadcast ready failed: ${e.message}`, "ERROR")
       );
       if (session) {
@@ -436,6 +383,8 @@ ws.addEventListener("message", (event) => {
           }).catch(() => {});
         }
         broadcastCommands();
+        broadcastModels();
+        broadcastSessionStats();
       }
     }
   } catch (err) {

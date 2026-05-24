@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent } from "react";
 import { usePi } from "../lib/use-pi";
-import type { SlashCommand, FileSuggestion } from "../stores/pi-store";
+import type { SlashCommand, FileSuggestion, AvailableModel } from "../stores/pi-store";
 import { Icon } from "./ember";
 
 // Same delimiter set as pi-tui's CombinedAutocompleteProvider. The @-token
@@ -31,6 +31,8 @@ export function Composer() {
   const abort = usePi((s) => s.abort);
   const model = usePi((s) => s.model);
   const commands = usePi((s) => s.commands);
+  const availableModels = usePi((s) => s.availableModels);
+  const sendSwitchModel = usePi((s) => s.sendSwitchModel);
   const searchFiles = usePi((s) => s.searchFiles);
 
   const [input, setInput] = useState("");
@@ -38,13 +40,39 @@ export function Composer() {
   const [slashIdx, setSlashIdx] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ── Model popup: detect "/model" or "/model <filter>" ───────────
+  const modelQuery = useMemo<string | null>(() => {
+    if (!input.startsWith("/model")) return null;
+    const rest = input.slice(6); // after "/model"
+    if (rest === "" || rest.startsWith(" ")) {
+      return rest.startsWith(" ") ? rest.slice(1).toLowerCase() : "";
+    }
+    return null; // e.g. "/modelsomething" — not our command
+  }, [input]);
+
+  const modelOpen = modelQuery !== null && availableModels.length > 0;
+
+  // All models sorted with current model first — used by the chip popup.
+  const sortedModels = useMemo<AvailableModel[]>(() => {
+    if (availableModels.length === 0) return [];
+    return [...availableModels].sort((a, b) => {
+      const aCur = model && a.provider === model.provider && a.id === model.id;
+      const bCur = model && b.provider === model.provider && b.id === model.id;
+      if (aCur && !bCur) return -1;
+      if (!aCur && bCur) return 1;
+      if (a.provider !== b.provider) return a.provider.localeCompare(b.provider);
+      return a.id.localeCompare(b.id);
+    });
+  }, [availableModels, model]);
+
   // ── Slash autocomplete (existing) ───────────────────────────────
   const slashQuery = useMemo<string | null>(() => {
+    if (modelOpen) return null; // model popup wins
     if (!input.startsWith("/")) return null;
     const firstSpace = input.indexOf(" ");
     if (firstSpace !== -1) return null;
     return input.slice(1).toLowerCase();
-  }, [input]);
+  }, [input, modelOpen]);
 
   const filteredCommands = useMemo<SlashCommand[]>(() => {
     if (slashQuery === null) return [];
@@ -63,12 +91,74 @@ export function Composer() {
     textareaRef.current?.focus();
   };
 
+  const [modelPopupOpen, setModelPopupOpen] = useState(false);
+  const chipRef = useRef<HTMLDivElement>(null);
+
+  // ── Model popup: filter + state ─────────────────────────────────
+  const [modelIdx, setModelIdx] = useState(0);
+
+  const filteredModels = useMemo<AvailableModel[]>(() => {
+    if (modelQuery === null) return [];
+    const q = (modelQuery ?? "").toLowerCase();
+    if (q === "") return sortedModels;
+    return availableModels.filter(
+      (m) =>
+        m.id.toLowerCase().includes(q) ||
+        m.provider.toLowerCase().includes(q) ||
+        `${m.provider}:${m.id}`.toLowerCase().includes(q) ||
+        (m.name && m.name.toLowerCase().includes(q))
+    );
+  }, [availableModels, modelQuery, sortedModels]);
+
+  useEffect(() => {
+    setModelIdx(0);
+  }, [modelQuery, filteredModels.length]);
+
+  const acceptModel = useCallback(
+    (m: AvailableModel) => {
+      sendSwitchModel(m);
+      // Build a nice transcript line
+      setInput("");
+      setCaret(0);
+      textareaRef.current?.focus();
+    },
+    [sendSwitchModel]
+  );
+
+  // Separate handler for the chip popup — doesn't clear input
+  const acceptModelFromChip = useCallback(
+    (m: AvailableModel) => {
+      sendSwitchModel(m);
+      setModelPopupOpen(false);
+      textareaRef.current?.focus();
+    },
+    [sendSwitchModel]
+  );
+
+  // ── Model chip popup: close on outside click ──────────────────
+  useEffect(() => {
+    if (!modelPopupOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (chipRef.current && !chipRef.current.contains(e.target as Node)) {
+        setModelPopupOpen(false);
+      }
+    };
+    // Use capturing phase to catch clicks before they close the popup
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, [modelPopupOpen]);
+
+  const handleChipClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setModelPopupOpen((prev) => !prev);
+  }, []);
+
   // ── @-mention file autocomplete ─────────────────────────────────
   // Recompute prefix from textarea value + caret on every input/select event.
   const atPrefix = useMemo<AtPrefix | null>(() => {
-    if (slashOpen) return null; // slash popup wins
+    if (slashOpen || modelOpen) return null; // slash/model popup wins
     return findAtPrefix(input, caret);
-  }, [input, caret, slashOpen]);
+  }, [input, caret, slashOpen, modelOpen]);
 
   const [atItems, setAtItems] = useState<FileSuggestion[]>([]);
   const [atIdx, setAtIdx] = useState(0);
@@ -141,6 +231,35 @@ export function Composer() {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (modelOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setModelIdx((i) => Math.min(i + 1, Math.max(0, filteredModels.length - 1)));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setModelIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        const chosen = filteredModels[modelIdx];
+        if (chosen) acceptModel(chosen);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setInput("");
+        return;
+      }
+      // Don't let Enter propagate to handleSend
+      if (e.key === "Enter") {
+        e.preventDefault();
+        return;
+      }
+      return; // All other keys go to textarea for search filtering
+    }
     if (slashOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -197,7 +316,16 @@ export function Composer() {
   return (
     <div className="composer">
       {error && <div className="composer-error">{error}</div>}
-      {slashOpen && (
+      {modelOpen && (
+        <ModelPopup
+          models={filteredModels}
+          activeIdx={modelIdx}
+          currentModel={model}
+          onPick={acceptModel}
+          onHoverIdx={setModelIdx}
+        />
+      )}
+      {!modelOpen && slashOpen && (
         <SlashPopup
           commands={filteredCommands}
           activeIdx={slashIdx}
@@ -245,14 +373,31 @@ export function Composer() {
       </div>
       {model && (
         <div
+          ref={chipRef}
           style={{
             display: "flex",
-            gap: 6,
+            flexDirection: "column-reverse",
+            alignItems: "flex-start",
+            gap: 4,
             marginTop: 8,
             paddingLeft: 2,
           }}
         >
-          <span className="btn-chip">
+          {modelPopupOpen && (
+            <ModelPopup
+              models={sortedModels}
+              activeIdx={modelIdx}
+              currentModel={model}
+              onPick={acceptModelFromChip}
+              onHoverIdx={setModelIdx}
+            />
+          )}
+          <span
+            className="btn-chip"
+            onClick={handleChipClick}
+            title="Click to switch model"
+            style={{ cursor: "pointer", userSelect: "none" }}
+          >
             <span className="status-dim">{model.provider}:</span>
             {model.id}
           </span>
@@ -307,6 +452,91 @@ function SlashPopup({ commands, activeIdx, onPick, onHoverIdx }: SlashPopupProps
   );
 }
 
+// ── Model popup: shows available models with search/filter ────────
+interface ModelPopupProps {
+  models: AvailableModel[];
+  activeIdx: number;
+  currentModel: { provider: string; id: string } | null;
+  onPick: (model: AvailableModel) => void;
+  onHoverIdx: (idx: number) => void;
+}
+
+function formatContext(cw: number | undefined): string {
+  if (!cw) return "";
+  if (cw >= 1_000_000) {
+    const m = cw / 1_000_000;
+    return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+  }
+  if (cw >= 1_000) {
+    const k = cw / 1_000;
+    return k % 1 === 0 ? `${k}K` : `${k.toFixed(1)}K`;
+  }
+  return `${cw}`;
+}
+
+function ModelPopup({ models, activeIdx, currentModel, onPick, onHoverIdx }: ModelPopupProps) {
+  const activeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx]);
+
+  if (models.length === 0) {
+    return (
+      <div className="composer-slash" role="listbox">
+        <div className="composer-slash-item" style={{ opacity: 0.6, fontStyle: "italic" }}>
+          <span className="composer-slash-arrow"> </span>
+          <span className="composer-slash-name">No matching models</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="composer-slash composer-model" role="listbox">
+      {models.map((m, i) => {
+        const active = i === activeIdx;
+        const isCurrent = currentModel && m.provider === currentModel.provider && m.id === currentModel.id;
+        const ctxStr = formatContext(m.contextWindow);
+        return (
+          <div
+            key={`${m.provider}:${m.id}`}
+            ref={active ? activeRef : undefined}
+            className={`composer-slash-item${active ? " composer-slash-item-active" : ""}`}
+            role="option"
+            aria-selected={active}
+            onMouseEnter={() => onHoverIdx(i)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPick(m);
+            }}
+          >
+            <span className="composer-slash-arrow">{active ? "→" : " "}</span>
+            <span className="composer-slash-name">
+              {m.id}
+              {isCurrent && (
+                <span style={{ color: "var(--color-success, #4ade80)", marginLeft: 4 }}>✓</span>
+              )}
+            </span>
+            <span className="composer-slash-source">{m.provider}</span>
+            {ctxStr && (
+              <span className="composer-slash-desc" style={{ marginLeft: "auto" }}>
+                {ctxStr}
+              </span>
+            )}
+          </div>
+        );
+      })}
+      <div className="composer-slash-item" style={{ opacity: 0.5, fontSize: "0.85em", paddingTop: 6, borderTop: "1px solid var(--color-border-subtle, #333)" }}>
+        <span className="composer-slash-arrow"> </span>
+        <span className="composer-slash-desc">
+          ↑↓ navigate &nbsp; ↵ select &nbsp; Esc cancel &nbsp; type to filter
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── File (@-mention) popup ────────────────────────────────────────
 interface FilePopupProps {
   items: FileSuggestion[];
   activeIdx: number;

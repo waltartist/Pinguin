@@ -7,8 +7,10 @@ import {
   type IDockviewPanelProps,
 } from "dockview-react";
 import { ChatArea } from "../ChatArea";
+import { DummyView } from "../DummyView";
 import { ToolsPanel } from "../ToolsPanel";
 import { StatusBar } from "../StatusBar";
+import { StatisticsPanel } from "../StatisticsPanel";
 import { MarkdownViewer } from "../MarkdownViewer";
 import { EmberTab } from "./EmberTab";
 import { ExtensionMount } from "./ExtensionMount";
@@ -141,9 +143,23 @@ const BUILTIN_PANELS: BuiltinPanelDef[] = [
     defaultPosition: () => ({ referencePanel: "chat", direction: "below" }),
   },
   {
+    id: "statistics",
+    component: "statistics",
+    title: "Statistics",
+    iconKey: "History",
+    defaultPosition: () => ({ referencePanel: "chat", direction: "below" }),
+  },
+  {
     id: "markdown",
     component: "markdown",
     title: "Markdown",
+    iconKey: "File",
+    defaultPosition: () => ({ referencePanel: "chat", direction: "right" }),
+  },
+  {
+    id: "dummy",
+    component: "dummy",
+    title: "Dummy",
     iconKey: "File",
     defaultPosition: () => ({ referencePanel: "chat", direction: "right" }),
   },
@@ -297,13 +313,17 @@ function buildDefaultLayout(api: DockviewApi) {
 const ChatPanel = (_props: IDockviewPanelProps) => <ChatArea />;
 const ToolsPanelView = (_props: IDockviewPanelProps) => <ToolsPanel />;
 const StatusPanelView = (_props: IDockviewPanelProps) => <StatusBar />;
+const StatisticsPanelView = (_props: IDockviewPanelProps) => <StatisticsPanel />;
 const MarkdownPanel = (_props: IDockviewPanelProps) => <MarkdownViewer />;
+const DummyPanel = (_props: IDockviewPanelProps) => <DummyView />;
 
 const panelComponents = {
   chat: ChatPanel,
   tools: ToolsPanelView,
   status: StatusPanelView,
+  statistics: StatisticsPanelView,
   markdown: MarkdownPanel,
+  dummy: DummyPanel,
   extension: ExtensionMount,
 };
 
@@ -446,6 +466,60 @@ export function Shell() {
 
     event.api.onDidRemovePanel((panel) => {
       markClosed(panel.id);
+    });
+
+    // ── UI Command Dispatcher (Fix 7) ──
+    const uiUnsub = (Neutralino as any).events.on("pi:ui_command", (raw: any) => {
+      const { verb, target } = raw.detail || {};
+      const [subVerb, id] = (target || "").trim().split(/\s+/);
+
+      if (verb === "open" && target) {
+        openMarkdownFile(target);
+        usePiStore.getState()._addNotice(`Opened markdown: ${target}`);
+      } else if (verb === "panel") {
+        if (subVerb === "open" && id) {
+          const builtin = BUILTIN_PANELS.find((p) => p.id === id);
+          if (builtin) {
+            addBuiltinPanel(event.api, builtin, { userInitiated: true });
+          } else {
+            const ext = useExtensionsStore.getState().extensions.get(id);
+            if (ext) {
+              addExtensionPanel(ext.id, ext.title, "Plus", { userInitiated: true });
+            } else {
+              usePiStore.getState()._addNotice(`Unknown panel ID: ${id}`, true);
+              return;
+            }
+          }
+          usePiStore.getState()._addNotice(`Opened panel: ${id}`);
+        } else if (subVerb === "close" && id) {
+          const panel = event.api.getPanel(id) ?? event.api.getPanel(extensionPanelId(id));
+          if (panel) {
+            panel.api.close();
+            usePiStore.getState()._addNotice(`Closed panel: ${id}`);
+          } else {
+            usePiStore.getState()._addNotice(`Panel not open: ${id}`, true);
+          }
+        } else if (subVerb === "focus" && id) {
+          const panel = event.api.getPanel(id) ?? event.api.getPanel(extensionPanelId(id));
+          if (panel) {
+            panel.focus();
+            usePiStore.getState()._addNotice(`Focused panel: ${id}`);
+          } else {
+            usePiStore.getState()._addNotice(`Panel not open: ${id}`, true);
+          }
+        } else if (subVerb === "list") {
+          const builtins = BUILTIN_PANELS.map((p) => {
+            const open = !!event.api.getPanel(p.id);
+            return `${open ? "●" : "○"} ${p.id} (builtin)`;
+          });
+          const extensions = Array.from(useExtensionsStore.getState().extensions.values()).map((e) => {
+            const open = !!event.api.getPanel(extensionPanelId(e.id));
+            return `${open ? "●" : "○"} ${e.id} (extension)`;
+          });
+          const text = ["Panels:", ...builtins, ...extensions].join("\n");
+          usePiStore.getState()._addNotice(text);
+        }
+      }
     });
 
     const flush = () => {

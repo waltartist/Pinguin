@@ -5,6 +5,16 @@ export interface ModelInfo {
   id: string;
 }
 
+export interface AvailableModel {
+  provider: string;
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  input?: string[];
+}
+
 export type Block =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string }
@@ -23,6 +33,31 @@ export interface SlashCommand {
   name: string;
   description: string;
   source: "builtin" | "extension" | "skill" | "prompt";
+}
+
+export interface SessionStats {
+  sessionId: string;
+  sessionName: string | null;
+  sessionFile: string | null;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  totalMessages: number;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  cost: number;
+  contextUsage: {
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+  } | null;
 }
 
 export interface FileSuggestion {
@@ -52,6 +87,8 @@ interface PiState {
   connectionError: string | null;
   cwd: string | null;
   commands: SlashCommand[];
+  availableModels: AvailableModel[];
+  sessionStats: SessionStats | null;
 }
 
 interface PiActions {
@@ -70,6 +107,10 @@ interface PiActions {
   _addNotice: (text: string, isError?: boolean) => void;
   _resetMessages: () => void;
   _setCommands: (commands: SlashCommand[]) => void;
+  _setAvailableModels: (models: AvailableModel[]) => void;
+  _setSessionStats: (stats: SessionStats | null) => void;
+  requestSessionStats: () => void;
+  sendSwitchModel: (model: AvailableModel) => void;
 }
 
 export const usePiStore = create<PiState & PiActions>()((set, get) => ({
@@ -81,6 +122,8 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   connectionError: null,
   cwd: null,
   commands: [],
+  availableModels: [],
+  sessionStats: null,
 
   sendPrompt: (text) => {
     if (!get().isReady || get().isStreaming) return;
@@ -193,4 +236,21 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
     })),
   _resetMessages: () => set({ messages: [], isStreaming: false, error: null }),
   _setCommands: (commands) => set({ commands }),
+  _setAvailableModels: (models) => set({ availableModels: models }),
+  _setSessionStats: (stats) => set({ sessionStats: stats }),
+  requestSessionStats: () => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "getStats",
+    });
+  },
+  sendSwitchModel: (model) => {
+    const text = `/model ${model.provider}:${model.id}`;
+    // Send as a command through the normal input path
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "prompt",
+      payload: { message: text },
+    });
+    // Optimistically update the model display
+    set({ model: { provider: model.provider, id: model.id } });
+  },
 }));

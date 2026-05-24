@@ -1,7 +1,12 @@
+- When user asks you to create a view.
+
+
+
+
 # Pi GUI
 
 Desktop GUI for the Pi coding agent. Neutralinojs shell, React webview,
-extensions written as `.tsx` files to `~/.pi/gui-extensions/`.
+extensions written as `.tsx` files to `gui-extensions/`.
 
 See [`implementation-plan.md`](implementation-plan.md) for architecture.
 
@@ -9,7 +14,7 @@ See [`implementation-plan.md`](implementation-plan.md) for architecture.
 
 **All UI in this repo follows the Ember style.** Before touching any
 `.tsx`, `.css`, or generating a new extension, read
-[`EMBER_STYLE_GUIDE.md`](EMBER_STYLE_GUIDE.md).
+[`docs/ember-style-guide.md`](docs/ember-style-guide.md).
 
 Key rules:
 
@@ -41,6 +46,4 @@ Key rules:
 | `src/webview/components/ExtensionHost.tsx` | The `pi-gui` module shim |
 | `src/backend/pi-bridge.js` | Pi session creation |
 | `src/backend/extension-watcher.js` | fs.watch + esbuild for extensions |
-| `src/backend/style-guide-installer.js` | Syncs style guide into `~/.pi/agent/` on each launch |
-| `~/.pi/agent/ember-style-guide.md` | Mirror of `EMBER_STYLE_GUIDE.md` Pi reads |
-| `~/.pi/agent/AGENTS.md` | Agent instructions injected per session |
+| `docs/ember-style-guide.md` | Canonical Ember style guide (formerly EMBER_STYLE_GUIDE.md) |

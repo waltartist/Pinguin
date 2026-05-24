@@ -1,7 +1,7 @@
 # Pi GUI — Ember Style Guide
 
-The canonical style reference for Pi GUI and any extension (`.tsx` written to
-`~/.pi/gui-extensions/`) that ships UI inside the app.
+The canonical style reference for Pi GUI and any extension (`.tsx` in
+`gui-extensions/`) that ships UI inside the app.
 
 **Vibe:** warm dark, orange accent, soft elevation, Raycast/Vercel-clean.
 Quiet by default — accent only earns attention, never decorates.

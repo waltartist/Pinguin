@@ -3,7 +3,7 @@
    ───────────────────────────────────────────────────────────────────────
    Warm dark · orange accent · IBM Plex Sans/Mono · soft elevation.
    Tokens mirror direction-ember.jsx from the design handoff.
-   See EMBER_STYLE_GUIDE.md for the canonical reference agents follow.
+   See docs/ember-style-guide.md for the canonical reference.
    ═══════════════════════════════════════════════════════════════════════ */
 
 *,
@@ -440,6 +440,7 @@ body {
   padding: 12px 20px 14px;
   border-top: 1px solid var(--border);
   background: var(--bg-2);
+  overflow: visible;
 }
 
 .composer-error {
@@ -1663,4 +1664,109 @@ body {
 }
 .block-md-link svg {
   flex-shrink: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Statistics Panel
+   ════════════════════════════════════════════════════════════════ */
+.stats-view {
+  padding: 12px 14px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.stats-view--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stats-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+}
+.stats-empty p {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.stats-section {
+  margin-bottom: 14px;
+}
+
+.stats-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.stats-label {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.stats-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+}
+
+.stats-value-dim {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.stats-sep {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 2px 0;
+}
+
+.stats-refresh {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+}
+
+.stats-refresh .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  padding: 4px 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.stats-refresh .btn-ghost:hover {
+  color: var(--text);
+  border-color: var(--border-hi);
 }

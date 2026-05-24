@@ -5,7 +5,6 @@ import { PresenceDot } from "./ember";
 export function StatusBar() {
   const isReady = usePi((s) => s.isReady);
   const isStreaming = usePi((s) => s.isStreaming);
-  const model = usePi((s) => s.model);
   const messages = usePi((s) => s.messages);
   const messageCount = messages.length;
 
@@ -42,15 +41,7 @@ export function StatusBar() {
         <PresenceDot state={activityState} size={6} />
         {isStreaming ? "streaming" : "idle"}
       </span>
-      {model && (
-        <>
-          <span className="status-sep">·</span>
-          <span className="status-item">
-            <span className="status-dim">{model.provider}:</span>
-            {model.id}
-          </span>
-        </>
-      )}
+      {/* Model chip removed — already shown in composer below the input */}
       <span style={{ flex: 1 }} />
       <span className="status-dim">{messageCount} msgs</span>
       <span className="status-sep">·</span>

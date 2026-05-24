@@ -1,0 +1,29 @@
+import { usePi, Icon, PresenceDot } from "pi-gui";
+
+export default {
+  id: "example-counter",
+  title: "Example Counter",
+  Component: () => {
+    const pi = usePi();
+    return (
+      <div className="extension-panel">
+        <div className="ext-header">
+          <Icon.Sparkle width={12} height={12} />
+          <span className="ext-title">Counter</span>
+          <span className="ext-tag">ext</span>
+        </div>
+        <div className="ext-body">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <PresenceDot state={pi.isStreaming ? "thinking" : "ready"} />
+            <span style={{ fontSize: 13, fontFamily: "var(--font-mono)" }}>
+              Messages: {pi.messages.length}
+            </span>
+          </div>
+          <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
+            Edit this file in gui-extensions/ to see hot-reloading in action.
+          </p>
+        </div>
+      </div>
+    );
+  }
+};
