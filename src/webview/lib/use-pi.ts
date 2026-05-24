@@ -89,6 +89,7 @@ function initBridge() {
 
   Neutralino.events.on("pi:event", (raw: any) => {
     const event = raw.detail;
+    console.log(`[pi:event] ${event.type}`);
 
     switch (event.type) {
       case "message_start": {
@@ -96,6 +97,7 @@ function initBridge() {
         if (!msg) break;
         // User prompt already shown optimistically by sendPrompt — skip Pi's echo.
         if (msg.role === "user") break;
+        console.log(`[pi:event] message_start: role=${msg.role}`);
         usePiStore.getState()._addMessage(msg);
         if (msg.role === "assistant") usePiStore.getState()._setStreaming(true);
         break;
@@ -202,6 +204,12 @@ function initBridge() {
     if (stats && typeof stats === "object") {
       usePiStore.getState()._setSessionStats(stats);
     }
+  });
+
+  // Backend detected a source change — show a Reload button.
+  Neutralino.events.on("pi:reload", () => {
+    console.log("[pi-gui] Backend source changed — showing Reload button");
+    usePiStore.getState()._setNeedsRestart(true);
   });
 
   // ── Retry / fallback: if still not ready, re-request state ──

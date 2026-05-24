@@ -89,6 +89,9 @@ interface PiState {
   commands: SlashCommand[];
   availableModels: AvailableModel[];
   sessionStats: SessionStats | null;
+  needsRestart: boolean;
+  pendingComposerInput: string | null;
+  pinnedCommands: string[];
 }
 
 interface PiActions {
@@ -109,8 +112,13 @@ interface PiActions {
   _setCommands: (commands: SlashCommand[]) => void;
   _setAvailableModels: (models: AvailableModel[]) => void;
   _setSessionStats: (stats: SessionStats | null) => void;
+  _setNeedsRestart: (v: boolean) => void;
   requestSessionStats: () => void;
   sendSwitchModel: (model: AvailableModel) => void;
+  _setPendingComposerInput: (text: string | null) => void;
+  _setPinnedCommands: (names: string[]) => void;
+  _addPinnedCommand: (name: string) => void;
+  _removePinnedCommand: (name: string) => void;
 }
 
 export const usePiStore = create<PiState & PiActions>()((set, get) => ({
@@ -124,6 +132,9 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   commands: [],
   availableModels: [],
   sessionStats: null,
+  needsRestart: false,
+  pendingComposerInput: null,
+  pinnedCommands: ["new", "compact", "reload"],
 
   sendPrompt: (text) => {
     if (!get().isReady || get().isStreaming) return;
@@ -237,20 +248,33 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   _resetMessages: () => set({ messages: [], isStreaming: false, error: null }),
   _setCommands: (commands) => set({ commands }),
   _setAvailableModels: (models) => set({ availableModels: models }),
+  _setNeedsRestart: (v) => set({ needsRestart: v }),
   _setSessionStats: (stats) => set({ sessionStats: stats }),
+  _setPendingComposerInput: (text) => set({ pendingComposerInput: text }),
+  _setPinnedCommands: (names) => set({ pinnedCommands: names }),
+  _addPinnedCommand: (name) =>
+    set((s) => {
+      if (s.pinnedCommands.includes(name)) return s;
+      return { pinnedCommands: [...s.pinnedCommands, name] };
+    }),
+  _removePinnedCommand: (name) =>
+    set((s) => ({
+      pinnedCommands: s.pinnedCommands.filter((n) => n !== name),
+    })),
   requestSessionStats: () => {
     Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
       type: "getStats",
     });
   },
   sendSwitchModel: (model) => {
-    const text = `/model ${model.provider}:${model.id}`;
-    // Send as a command through the normal input path
+    // Match Pi's approach: send a dedicated switchModel event, not a prompt.
+    // This bypasses the prompt input queue entirely, avoiding race conditions
+    // where a /model command and subsequent prompt could interfere.
     Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
-      type: "prompt",
-      payload: { message: text },
+      type: "switchModel",
+      payload: { provider: model.provider, id: model.id },
     });
-    // Optimistically update the model display
+    // Optimistically update the model display; the backend will confirm via pi:model
     set({ model: { provider: model.provider, id: model.id } });
   },
 }));

@@ -13,7 +13,7 @@ Based on a thorough audit of the Pi TUI documentation (usage, keybindings, theme
 | `/clone` — duplicate active branch into new session | ✅ Full implementation | ❌ **Stub only** |
 | `/tree` — session tree navigation & branch visualization | ✅ Full implementation | ❌ **Stub only** |
 | `/import` — import a session or file | ✅ Full implementation | ❌ **Stub only** |
-| `/share` — upload session as private GitHub gist | ✅ Full implementation | ❌ **Stub only** |
+
 | Session auto-save to `~/.pi/agent/sessions/` | ✅ Automatic | ❌ **Not wired** — the GUI creates sessions via `createAgentSession()` but has no session history viewer, no session persistence UI, no `/continue` equivalent |
 | `pi -c` / `pi -r` — continue or resume sessions from CLI | ✅ | ❌ Not surfaced in GUI startup |
 
@@ -43,7 +43,6 @@ Based on a thorough audit of the Pi TUI documentation (usage, keybindings, theme
 | **Jump to character** — Ctrl+], Ctrl+Alt+] | ✅ | ❌ Not implemented |
 | **Kill ring** — Ctrl+W (delete word back), Alt+D (delete word forward), Ctrl+K (delete to line end), Ctrl+U (delete to line start), Ctrl+Y (yank), Alt+Y (yank-pop) | ✅ | ❌ Not implemented |
 | **Undo** — Ctrl+- | ✅ | ❌ Not bound |
-| **Paste images** — Ctrl+V, Alt+V (Windows), drag into terminal | ✅ | ❌ **Not implemented** — no image paste handling in Composer |
 | **Multi-line selection** — Shift+arrow, Shift+click | ✅ | ❌ Not implemented for selection-based commands |
 
 ---
@@ -141,3 +140,13 @@ Pi extensions can call these `ctx.ui` methods in the TUI. They have no GUI equiv
 14. Rich editor keybindings (kill ring, word jump, jump-to-char)
 15. Session export/sharing management
 16. Startup header showing loaded resources
+
+
+
+That's expected! The chat messages live in the **frontend's** Zustand store (in `pi-store.ts`), not in the backend. When the backend reloads:
+
+1. The new backend process connects and broadcasts `pi:ready`
+2. The `pi:ready` handler at line 140 of `use-pi.ts` calls `_setReady(cwd)` — it does **not** clear messages
+3. Your chat history stays in the UI
+
+So the messages you see are the frontend's cached copy. The backend's Pi session **is** fresh — if you send a new message, the new session won't have context of the conversation before the reload.

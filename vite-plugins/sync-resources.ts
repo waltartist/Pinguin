@@ -34,6 +34,10 @@ export function syncResourcesPlugin(): Plugin {
     },
 
     closeBundle() {
+      // Skip sync during dev (vite dev). The dev server handles serving files.
+      // HMR replaces modules in-place — no disk sync needed.
+      if (config.command === "serve") return;
+
       const root = config.root;
       const outDir = join(root, config.build.outDir);
       const stagingDir = join(root, STAGING);

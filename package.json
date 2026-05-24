@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Desktop GUI wrapper for the Pi coding agent",
   "scripts": {
-    "dev:webview": "vite build --watch",
+    "dev:webview": "vite dev",
+    "dev:webview:build-watch": "vite build --watch",
     "dev:backend": "node src/backend/main.js",
     "dev": "concurrently \"npm run dev:webview\" \"npm run dev:backend\"",
-    "dev:all": "npm run build:webview && concurrently --kill-others \"npm run dev:webview\" \"npm run dev:backend\" \"neu run\"",
+    "dev:all": "concurrently --kill-others \"npm run dev:webview\" \"neu run\"",
     "build:webview": "vite build",
     "build": "npm run build:webview && neu build",
     "start": "neu run"

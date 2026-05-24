@@ -12,9 +12,11 @@ import { ToolsPanel } from "../ToolsPanel";
 import { StatusBar } from "../StatusBar";
 import { StatisticsPanel } from "../StatisticsPanel";
 import { MarkdownViewer } from "../MarkdownViewer";
+import { CommandsPanel } from "../CommandsPanel";
 import { EmberTab } from "./EmberTab";
 import { ExtensionMount } from "./ExtensionMount";
 import { Icon } from "../ember";
+import { usePi } from "../../lib/use-pi";
 import { useExtensionsStore } from "../../stores/extensions-store";
 import { useFileViewStore } from "../../stores/file-view-store";
 
@@ -124,6 +126,7 @@ interface BuiltinPanelDef {
   title: string;
   iconKey: IconKey;
   defaultPosition?: () => Parameters<DockviewApi["addPanel"]>[0]["position"];
+  initialSize?: number;
 }
 
 const BUILTIN_PANELS: BuiltinPanelDef[] = [
@@ -155,6 +158,14 @@ const BUILTIN_PANELS: BuiltinPanelDef[] = [
     title: "Markdown",
     iconKey: "File",
     defaultPosition: () => ({ referencePanel: "chat", direction: "right" }),
+  },
+  {
+    id: "commands",
+    component: "commands",
+    title: "Commands",
+    iconKey: "Terminal",
+    defaultPosition: () => ({ referencePanel: "chat", direction: "below" }),
+    initialSize: 40,
   },
   {
     id: "dummy",
@@ -255,6 +266,9 @@ function addBuiltinPanel(
     title: def.title,
     params: { iconKey: def.iconKey },
     position: def.defaultPosition?.(),
+    ...(def.initialSize != null
+      ? { initialHeight: def.initialSize }
+      : {}),
   });
 }
 
@@ -315,6 +329,7 @@ const ToolsPanelView = (_props: IDockviewPanelProps) => <ToolsPanel />;
 const StatusPanelView = (_props: IDockviewPanelProps) => <StatusBar />;
 const StatisticsPanelView = (_props: IDockviewPanelProps) => <StatisticsPanel />;
 const MarkdownPanel = (_props: IDockviewPanelProps) => <MarkdownViewer />;
+const CommandsPanelView = (props: IDockviewPanelProps) => <CommandsPanel panelApi={props.api} />;
 const DummyPanel = (_props: IDockviewPanelProps) => <DummyView />;
 
 const panelComponents = {
@@ -323,6 +338,7 @@ const panelComponents = {
   status: StatusPanelView,
   statistics: StatisticsPanelView,
   markdown: MarkdownPanel,
+  commands: CommandsPanelView,
   dummy: DummyPanel,
   extension: ExtensionMount,
 };
@@ -338,6 +354,18 @@ interface MenuItem {
 }
 
 function PanelMenu({ api }: { api: DockviewApi | null }) {
+  const needsRestart = usePi((s) => s.needsRestart);
+  const _setNeedsRestart = usePi((s) => s._setNeedsRestart);
+
+  const handleReload = useCallback(() => {
+    _setNeedsRestart(false);
+    Neutralino.events.broadcast("pi:input", {
+      type: "reload_backend",
+      payload: {},
+    }).catch((err: any) =>
+      console.error("reload broadcast failed:", err)
+    );
+  }, [_setNeedsRestart]);
   const [open, setOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const extensions = useExtensionsStore((s) => s.extensions);
@@ -394,6 +422,17 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
 
   return (
     <div className="pi-dock-menu">
+      {needsRestart && (
+        <button
+          type="button"
+          className="pi-dock-menu__button pi-dock-menu__restart"
+          onClick={handleReload}
+          title="Backend source changed — click to reload"
+        >
+          <span className="pi-dock-restart-dot" />
+          Reload ↻
+        </button>
+      )}
       <button
         type="button"
         className="pi-dock-menu__button"

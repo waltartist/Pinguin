@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "defaultMode": "window",
   "port": 0,
-  "url": "/",
+  "url": "http://localhost:5173",
   "documentRoot": "/resources/",
   "enableServer": true,
   "enableNativeAPI": true,

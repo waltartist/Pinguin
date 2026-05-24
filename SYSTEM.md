@@ -47,3 +47,4 @@ Key rules:
 | `src/backend/pi-bridge.js` | Pi session creation |
 | `src/backend/extension-watcher.js` | fs.watch + esbuild for extensions |
 | `docs/ember-style-guide.md` | Canonical Ember style guide (formerly EMBER_STYLE_GUIDE.md) |
+| `C:\Users\Walt\.opensrc\repos\github.com\earendil-works\pi\main` | Pi sourcedata

@@ -40,6 +40,18 @@ export function Composer() {
   const [slashIdx, setSlashIdx] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ── Watch for pending composer input from external panels (Commands view) ─
+  const pendingComposerInput = usePi((s) => s.pendingComposerInput);
+  const _setPendingComposerInput = usePi((s) => s._setPendingComposerInput);
+
+  useEffect(() => {
+    if (pendingComposerInput === null) return;
+    setInput(pendingComposerInput);
+    setCaret(pendingComposerInput.length);
+    _setPendingComposerInput(null);
+    textareaRef.current?.focus();
+  }, [pendingComposerInput, _setPendingComposerInput]);
+
   // ── Model popup: detect "/model" or "/model <filter>" ───────────
   const modelQuery = useMemo<string | null>(() => {
     if (!input.startsWith("/model")) return null;
@@ -353,7 +365,6 @@ export function Composer() {
           onKeyDown={handleKeyDown}
           placeholder={isReady ? "Ask Pi…  (type @ to attach files)" : "Starting Pi…"}
           disabled={!isReady}
-          rows={1}
         />
         <div className="composer-actions">
           {isStreaming ? (
