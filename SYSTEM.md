@@ -1,6 +1,6 @@
-# Pi GUI
+# Pinguin
 
-Desktop GUI for the Pi coding agent. Neutralinojs shell, React webview,
+Beta desktop GUI for the Pi coding agent. Neutralinojs shell, React webview,
 extensions written as `.tsx` files to `gui-extensions/`.
 
 See [`implementation-plan.md`](implementation-plan.md) for architecture.
@@ -42,4 +42,3 @@ Key rules:
 | `src/backend/pi-bridge.js` | Pi session creation |
 | `src/backend/extension-watcher.js` | fs.watch + esbuild for extensions |
 | `docs/ember-style-guide.md` | Canonical Ember style guide (formerly EMBER_STYLE_GUIDE.md) |
-| `C:\Users\Walt\.opensrc\repos\github.com\earendil-works\pi\main` | Pi sourcedata

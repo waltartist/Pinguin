@@ -1,4 +1,4 @@
-// Type declarations for the Pi GUI extension API.
+// Type declarations for the Pinguin extension API.
 // Sync this file to gui-extensions/pi-gui.d.ts
 
 declare module "pi-gui" {

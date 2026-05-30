@@ -1,6 +1,6 @@
 {
-  "applicationId": "dev.pi.gui",
-  "version": "1.0.0",
+  "applicationId": "dev.pinguin.app",
+  "version": "0.1.0-beta.1",
   "defaultMode": "window",
   "port": 0,
   "url": "/",
@@ -9,7 +9,17 @@
   "enableNativeAPI": true,
   "enableExtensions": true,
   "exportAuthInfo": true,
-  "nativeBlockList": [],
+  "nativeAllowList": [
+    "app.broadcast",
+    "app.exit",
+    "clipboard.writeText",
+    "events.broadcast",
+    "extensions.dispatch",
+    "filesystem.readFile",
+    "filesystem.writeFile",
+    "storage.getData",
+    "storage.setData"
+  ],
   "extensions": [
     {
       "id": "pi-backend",
@@ -20,14 +30,14 @@
   ],
   "modes": {
     "window": {
-      "title": "Pi GUI",
+      "title": "Pinguin",
       "width": 1100,
       "height": 700,
       "fullScreen": false
     }
   },
   "cli": {
-    "binaryName": "pi-gui",
+    "binaryName": "pinguin",
     "resourcesPath": "/resources/",
     "extensionsPath": "/extensions/",
     "clientLibrary": "/resources/neutralino.js",

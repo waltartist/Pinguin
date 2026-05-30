@@ -2,7 +2,7 @@
 
 interface NeutralinoEvents {
   on(event: string, handler: (data: any) => void): void;
-  broadcast(event: string, data: unknown): void;
+  broadcast(event: string, data: unknown): Promise<unknown>;
 }
 
 interface NeutralinoExtensions {

@@ -17,7 +17,19 @@ import { spawn } from "node:child_process";
 // On manual reload, the old process spawns a child and exits. The child
 // inherits the same stdin/stdout pipes but stdin data is already consumed.
 // We cache the connection info so the child can find it.
-const CONNECTION_CACHE = path.join(os.tmpdir(), "pi-gui-connection.json");
+const CONNECTION_CACHE =
+  process.env.PINGUIN_CONNECTION_CACHE ||
+  path.join(os.tmpdir(), `pinguin-connection-${process.pid}-${crypto.randomUUID()}.json`);
+
+function writeConnectionCache(data) {
+  fs.writeFileSync(CONNECTION_CACHE, JSON.stringify(data), { mode: 0o600 });
+}
+
+function removeConnectionCache() {
+  try {
+    fs.unlinkSync(CONNECTION_CACHE);
+  } catch {}
+}
 
 function getConnectionInfo() {
   // On reload spawn, the child is started with --reloaded flag.
@@ -36,7 +48,7 @@ function getConnectionInfo() {
     const raw = fs.readFileSync(process.stdin.fd, "utf-8").trim();
     if (raw.length > 0) {
       const data = JSON.parse(raw);
-      fs.writeFileSync(CONNECTION_CACHE, JSON.stringify(data));
+      writeConnectionCache(data);
       return data;
     }
   } catch {}
@@ -319,16 +331,17 @@ async function handleWebviewInput(data) {
       // The child starts with --reloaded and reads connection info from cache.
       log("Reloading backend...");
       // Ensure cache is fresh
-      fs.writeFileSync(CONNECTION_CACHE, JSON.stringify({
+      writeConnectionCache({
         nlPort: NL_PORT,
         nlToken: NL_TOKEN,
         nlConnectToken: NL_CTOKEN,
         nlExtensionId: NL_EXTID,
-      }));
+      });
       const child = spawn(process.execPath, [process.argv[1], "--reloaded"], {
         stdio: "inherit",
         detached: true,
         windowsHide: true,
+        env: { ...process.env, PINGUIN_CONNECTION_CACHE: CONNECTION_CACHE },
       });
       child.unref();
       // Brief delay so the child can start before we close the WebSocket
@@ -422,7 +435,7 @@ ws.addEventListener("open", async () => {
     await broadcastCommands();
     await broadcastModels();
     broadcastSessionStats();
-    log("Pi GUI ready");
+    log("Pinguin ready");
   } catch (err) {
     log(`Fatal: ${err.message}`, "ERROR");
     // Surface to webview instead of exiting silently.
@@ -526,6 +539,7 @@ ws.addEventListener("message", (event) => {
 });
 
 ws.addEventListener("close", () => {
+  removeConnectionCache();
   log("Connection closed — exiting");
   process.exit(0);
 });

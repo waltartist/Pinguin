@@ -7,6 +7,8 @@
 // Result = { text?, isError?, event?, eventData? } | null (unknown)
 
 import { createPiSession } from "./pi-bridge.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands }) {
   const builtins = [
@@ -95,7 +97,7 @@ export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands
 
     {
       name: "quit",
-      description: "Quit Pi GUI",
+      description: "Quit Pinguin",
       run: async () => {
         setTimeout(() => callMethod("app.exit", {}).catch(() => {}), 100);
         return { text: "Exiting…" };
@@ -209,16 +211,9 @@ export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands
       run: async () => {
         try {
           const { readFile } = await import("node:fs/promises");
-          const pathMod = await import("node:path");
-          const osMod = await import("node:os");
-          const sdkDir = pathMod.join(
-            process.env.APPDATA || pathMod.join(osMod.homedir(), ".npm-global"),
-            "npm",
-            "node_modules",
-            "@earendil-works",
-            "pi-coding-agent"
-          );
-          const content = await readFile(pathMod.join(sdkDir, "CHANGELOG.md"), "utf-8");
+          const sdkEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+          const sdkDir = dirname(dirname(sdkEntry));
+          const content = await readFile(join(sdkDir, "CHANGELOG.md"), "utf-8");
           const lines = content.split("\n").slice(0, 80);
           return { text: lines.join("\n") };
         } catch (err) {

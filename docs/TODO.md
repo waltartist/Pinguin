@@ -1,6 +1,6 @@
-# Pi TUI Features Not Yet Implemented in Pi GUI
+# Pi TUI Features Not Yet Implemented in Pinguin
 
-Based on a thorough audit of the Pi TUI documentation (usage, keybindings, themes, extensions, sessions, TUI components), the existing Pi GUI codebase, and the implementation plan, here is every feature gap:
+Based on a thorough audit of the Pi TUI documentation (usage, keybindings, themes, extensions, sessions, TUI components), the existing Pinguin codebase, and the implementation plan, here is every feature gap:
 
 ---
 

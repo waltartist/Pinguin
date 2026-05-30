@@ -1,9 +1,13 @@
 {
-  "name": "pi-gui",
-  "version": "1.0.0",
+  "name": "pinguin",
+  "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
-  "description": "Desktop GUI wrapper for the Pi coding agent",
+  "description": "Beta desktop GUI for the Pi coding agent",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev:webview": "vite dev",
     "dev:webview:build-watch": "vite build --watch",
@@ -12,12 +16,16 @@
     "dev:all": "npx @neutralinojs/neu run",
     "dev:all-legacy": "concurrently --kill-others \"npm run dev:webview\" \"neu run\"",
     "build:webview": "vite build",
-    "build": "npm run build:webview && neu build",
-    "start": "neu run"
+    "build": "npm run build:webview",
+    "start": "neu run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "npm run typecheck && npm run build:webview"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.75.5",
     "@neutralinojs/lib": "^6.7.0",
     "dockview-react": "^4.13.1",
+    "esbuild": "0.28.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-markdown": "^10.1.0",
@@ -28,10 +36,12 @@
     "@neutralinojs/neu": "^11.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
+    "@vitejs/plugin-react": "6.0.2",
     "concurrently": "^9.0.0",
-    "esbuild": "^0.24.0",
     "typescript": "^5.5.0",
-    "vite": "^5.4.0"
+    "vite": "8.0.14"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

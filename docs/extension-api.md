@@ -1,12 +1,14 @@
-# Pi GUI — Extension API
+# Pinguin Extension API
 
-Pi GUI allows you to extend the interface by writing React components in `.tsx`
+Pinguin allows you to extend the interface by writing React components in `.tsx`
 files. These are compiled on the fly and mounted in the app's dock.
 
 ## Location
 
-- Global extensions: `~/.pi/gui-extensions/*.tsx`
-- Per-Pi-extension sidecars: `~/.pi/extensions/<name>/gui/*.tsx`
+- Project-local extensions: `<pinguin-repository>/gui-extensions/*.tsx`
+
+Global extensions and per-Pi-extension sidecars are planned, but are not loaded
+by the beta release yet.
 
 ## Module Shape
 
@@ -64,5 +66,6 @@ A React hook that provides access to the Pi agent state and actions.
 
 ## Evaluation Notice
 
-Pi GUI uses `new Function()` and `eval()` to mount extensions live. This is a
-known trade-off to enable the "drop file, get capability" workflow.
+Pinguin uses `new Function()` to mount extensions live. Extensions are trusted
+local code with the same frontend permissions as the app. Review extension
+source before adding it to `gui-extensions/`.

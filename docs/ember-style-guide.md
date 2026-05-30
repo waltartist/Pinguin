@@ -1,6 +1,6 @@
-# Pi GUI — Ember Style Guide
+# Pinguin Ember Style Guide
 
-The canonical style reference for Pi GUI and any extension (`.tsx` in
+The canonical style reference for Pinguin and any extension (`.tsx` in
 `gui-extensions/`) that ships UI inside the app.
 
 **Vibe:** warm dark, orange accent, soft elevation, Raycast/Vercel-clean.

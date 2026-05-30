@@ -1,5 +1,8 @@
 # Pi GUI — Implementation Plan
 
+> Historical design document. For the current Pinguin beta setup and supported
+> features, use [`README.md`](README.md) and the files under [`docs/`](docs/).
+
 ## Project Overview
 
 Pi GUI is a desktop GUI wrapper around the [Pi coding agent](https://pi.dev). It provides a chat-based interface for interacting with Pi as an agentic coding assistant, with the key feature that **you can ask Pi to extend the GUI itself** — adding panels, tools, and views — and they appear live without reloading.

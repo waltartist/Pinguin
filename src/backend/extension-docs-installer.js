@@ -1,4 +1,4 @@
-// Installs Pi GUI's extension API docs and types into the project-local
+// Installs Pinguin's extension API docs and types into the project-local
 // gui-extensions directory.
 //
 // 1. `<project>/gui-extensions/README.md` — Overwritten on every launch from repo.

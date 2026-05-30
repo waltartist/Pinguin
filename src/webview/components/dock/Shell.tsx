@@ -17,6 +17,7 @@ import { EmberTab } from "./EmberTab";
 import { ExtensionMount } from "./ExtensionMount";
 import { Icon } from "../ember";
 import { usePi } from "../../lib/use-pi";
+import { usePiStore } from "../../stores/pi-store";
 import { useExtensionsStore } from "../../stores/extensions-store";
 import { useFileViewStore } from "../../stores/file-view-store";
 
@@ -421,7 +422,7 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
 
   const handleReload = useCallback(() => {
     _setNeedsRestart(false);
-    Neutralino.events.broadcast("pi:input", {
+    Neutralino?.events.broadcast("pi:input", {
       type: "reload_backend",
       payload: {},
     }).catch((err: any) =>

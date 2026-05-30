@@ -21,7 +21,7 @@ export function Transcript() {
     <div className="transcript" ref={containerRef}>
       {messages.length === 0 && (
         <div className="transcript-empty">
-          <h2>Pi GUI</h2>
+          <h2>Pinguin</h2>
           <p>Ask Pi to do something — or ask it to extend this interface.</p>
         </div>
       )}

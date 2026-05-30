@@ -219,7 +219,7 @@ export function CommandsPanel({ panelApi }: { panelApi?: any }) {
           {addOpen && (
             <AddDropdown
               available={availableCmds}
-              onAdd={_addPinnedCommand}
+              onAdd={(cmd) => _addPinnedCommand(cmd.name)}
               onClose={() => setAddOpen(false)}
             />
           )}
