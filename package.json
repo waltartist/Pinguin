@@ -18,8 +18,9 @@
     "build:webview": "vite build",
     "build": "npm run build:webview",
     "start": "node scripts/start-dev.js",
+    "check:neutralino": "node scripts/check-neutralino-globals.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "check": "npm run typecheck && npm run build:webview"
+    "check": "npm run check:neutralino && npm run typecheck && npm run build:webview"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.75.5",
