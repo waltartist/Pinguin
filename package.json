@@ -18,6 +18,7 @@
     "build:webview": "vite build",
     "build": "npm run build:webview",
     "start": "node scripts/start-dev.js",
+    "start:debug": "node scripts/start-dev.js --debug-window",
     "check:neutralino": "node scripts/check-neutralino-globals.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "npm run check:neutralino && npm run typecheck && npm run build:webview"

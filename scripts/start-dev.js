@@ -7,6 +7,7 @@ import { arch, platform } from "node:process";
 const authInfoPath = resolve(".tmp", "auth_info.json");
 const indexPath = resolve("index.html");
 const viteCli = resolve("node_modules", "vite", "bin", "vite.js");
+const debugWindow = process.argv.includes("--debug-window");
 
 function findAvailablePort(excludedPorts = new Set()) {
   return new Promise((resolvePort, reject) => {
@@ -105,6 +106,9 @@ const neutralinoBinary = getNeutralinoBinary();
 
 console.log(`Starting Pinguin with Vite at ${devUrl}`);
 console.log(`Using Neutralino core at ${coreUrl}`);
+if (debugWindow) {
+  console.log("Opening Neutralino webview inspector.");
+}
 
 if (process.argv.includes("--dry-run")) {
   console.log("Dry run complete.");
@@ -149,15 +153,24 @@ try {
 }
 
 console.log("Starting Neutralino core.");
+const coreArgs = [
+  "--load-dir-res",
+  "--path=.",
+  "--export-auth-info",
+  `--port=${corePort}`,
+  `--url=${devUrl}`,
+];
+
+if (debugWindow) {
+  coreArgs.push(
+    "--window-enable-inspector",
+    "--window-open-inspector-on-startup"
+  );
+}
+
 coreProcess = spawn(
   neutralinoBinary,
-  [
-    "--load-dir-res",
-    "--path=.",
-    "--export-auth-info",
-    `--port=${corePort}`,
-    `--url=${devUrl}`,
-  ],
+  coreArgs,
   {
     cwd: process.cwd(),
     stdio: "inherit",

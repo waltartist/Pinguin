@@ -24,4 +24,8 @@ if (!config.nativeAllowList.includes("extensions.getStats")) {
   throw new Error("Neutralino nativeAllowList must include extensions.getStats.");
 }
 
+if (config.modes?.window?.webviewArgs !== "--disable-gpu") {
+  throw new Error("Neutralino window mode must disable GPU rendering for WebView2.");
+}
+
 console.log("Neutralino globals bootstrap is present.");
