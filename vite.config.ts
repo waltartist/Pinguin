@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react(), syncResourcesPlugin()],
   base: "./",
   server: {
-    port: 5173,
+    port: Number.parseInt(process.env.PINGUIN_DEV_PORT || "5173", 10),
     strictPort: true,
   },
   build: {

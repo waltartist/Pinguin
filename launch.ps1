@@ -7,7 +7,7 @@ Set-Location $PSScriptRoot
 
 Write-Host "Launching Pinguin with HMR..." -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop all processes" -ForegroundColor Yellow
-npx @neutralinojs/neu run
+node scripts/start-dev.js
 # Frontend HMR: edit .tsx/.ts files — updates instantly via Vite dev server
 # Backend changes: detected by file watcher → shows Reload button in UI → click to reload
 # Extension connection: Neutralino patches HTML → NL_PORT/NL_TOKEN injected → WebSocket connects

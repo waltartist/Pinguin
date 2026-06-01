@@ -30,8 +30,7 @@ npm install
 npm start
 ```
 
-The source-install beta uses a local Vite server on port `5173`. Stop any
-existing Pinguin instance before starting another one.
+The source-install beta starts a local Vite server on an available port.
 
 ## Development
 
@@ -40,14 +39,7 @@ npm install
 npm run dev:all
 ```
 
-Development mode also uses Vite on port `5173`.
-
-## Troubleshooting
-
-If startup reports that port `5173` is already in use, close the existing
-Pinguin development instance or the process using that port, then run
-`npm start` again. Pinguin refuses to start in that situation so it cannot
-accidentally connect to another project's frontend server.
+Development mode also selects an available local Vite port automatically.
 
 Useful checks:
 
