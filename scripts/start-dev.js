@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { arch, platform } from "node:process";
 
+const authInfoPath = resolve(".tmp", "auth_info.json");
 const indexPath = resolve("index.html");
 const viteCli = resolve("node_modules", "vite", "bin", "vite.js");
 
@@ -58,9 +59,9 @@ function waitForPort(port, timeoutMs = 20_000) {
   });
 }
 
-function patchIndexHtml(coreUrl) {
-  const sourceHtml = readFileSync(indexPath, "utf-8");
-  const originalHtml = sourceHtml
+function normalizeIndexHtml() {
+  const html = readFileSync(indexPath, "utf-8");
+  const normalizedHtml = html
     .replace(
       /(<script src=")[^"]*__neutralino_globals\.js("><\/script>)/,
       "$1./__neutralino_globals.js$2"
@@ -69,22 +70,10 @@ function patchIndexHtml(coreUrl) {
       /(<script src=")[^"]*neutralino\.js("><\/script>)/,
       "$1./neutralino.js$2"
     );
-  const patchedHtml = originalHtml
-    .replace(
-      /(<script src=")[^"]*__neutralino_globals\.js("><\/script>)/,
-      `$1${coreUrl}/__neutralino_globals.js$2`
-    )
-    .replace(
-      /(<script src=")[^"]*neutralino\.js("><\/script>)/,
-      `$1${coreUrl}/neutralino.js$2`
-    );
 
-  if (patchedHtml === sourceHtml) {
-    throw new Error("Could not patch Neutralino scripts in index.html.");
+  if (html !== normalizedHtml) {
+    writeFileSync(indexPath, normalizedHtml);
   }
-
-  writeFileSync(indexPath, patchedHtml);
-  return () => writeFileSync(indexPath, originalHtml);
 }
 
 function getNeutralinoBinary() {
@@ -107,6 +96,7 @@ function getNeutralinoBinary() {
   return binaryPath;
 }
 
+normalizeIndexHtml();
 const vitePort = await findAvailablePort();
 const corePort = await findAvailablePort(new Set([vitePort]));
 const devUrl = `http://127.0.0.1:${vitePort}`;
@@ -116,7 +106,12 @@ const neutralinoBinary = getNeutralinoBinary();
 console.log(`Starting Pinguin with Vite at ${devUrl}`);
 console.log(`Using Neutralino core at ${coreUrl}`);
 
-let restoreIndexHtml = patchIndexHtml(coreUrl);
+if (process.argv.includes("--dry-run")) {
+  console.log("Dry run complete.");
+  process.exit(0);
+}
+
+rmSync(authInfoPath, { force: true });
 let viteProcess;
 let coreProcess;
 let cleanedUp = false;
@@ -126,20 +121,16 @@ function cleanup() {
   cleanedUp = true;
   if (coreProcess?.exitCode === null) coreProcess.kill();
   if (viteProcess?.exitCode === null) viteProcess.kill();
-  restoreIndexHtml?.();
-  restoreIndexHtml = null;
-}
-
-if (process.argv.includes("--dry-run")) {
-  cleanup();
-  console.log("Dry run complete. Restored index.html.");
-  process.exit(0);
 }
 
 viteProcess = spawn(process.execPath, [viteCli, "dev", "--host", "127.0.0.1"], {
   cwd: process.cwd(),
   stdio: "inherit",
-  env: { ...process.env, PINGUIN_DEV_PORT: String(vitePort) },
+  env: {
+    ...process.env,
+    PINGUIN_CORE_PORT: String(corePort),
+    PINGUIN_DEV_PORT: String(vitePort),
+  },
   windowsHide: true,
 });
 

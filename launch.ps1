@@ -1,6 +1,6 @@
 # Pinguin: Launch with HMR (Vite + Neutralino)
-# The launcher reserves separate Vite and Neutralino ports, patches the
-# development HTML before opening the native window, and restores it on exit.
+# The launcher selects available Vite and Neutralino ports. Vite serves the
+# Neutralino development globals with NL_TOKEN injected for the webview.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -9,4 +9,4 @@ Write-Host "Press Ctrl+C to stop all processes" -ForegroundColor Yellow
 node scripts/start-dev.js
 # Frontend HMR: edit .tsx/.ts files to update instantly via Vite.
 # Backend changes: detected by file watcher; use Reload in the UI.
-# Extension connection: patched HTML loads NL_PORT/NL_TOKEN before WebSocket startup.
+# Extension connection: Vite injects NL_PORT/NL_TOKEN before WebSocket startup.

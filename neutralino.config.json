@@ -15,6 +15,7 @@
     "clipboard.writeText",
     "events.broadcast",
     "extensions.dispatch",
+    "extensions.getStats",
     "filesystem.readFile",
     "filesystem.writeFile",
     "storage.getData",
