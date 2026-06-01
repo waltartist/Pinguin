@@ -13,11 +13,11 @@
     "dev:webview:build-watch": "vite build --watch",
     "dev:backend": "node src/backend/main.js",
     "dev": "concurrently \"npm run dev:webview\" \"npm run dev:backend\"",
-    "dev:all": "npx @neutralinojs/neu run",
+    "dev:all": "node scripts/check-dev-port.js && npx @neutralinojs/neu run",
     "dev:all-legacy": "concurrently --kill-others \"npm run dev:webview\" \"neu run\"",
     "build:webview": "vite build",
     "build": "npm run build:webview",
-    "start": "neu run",
+    "start": "node scripts/check-dev-port.js && neu run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "npm run typecheck && npm run build:webview"
   },
