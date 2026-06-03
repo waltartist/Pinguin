@@ -7,7 +7,13 @@ import { arch, platform } from "node:process";
 const authInfoPath = resolve(".tmp", "auth_info.json");
 const indexPath = resolve("index.html");
 const viteCli = resolve("node_modules", "vite", "bin", "vite.js");
+const backendEntry = resolve("src", "backend", "main.js");
+const backendExtensionId = "pi-backend";
 const debugWindow = process.argv.includes("--debug-window");
+
+if (!existsSync(viteCli)) {
+  throw new Error("Dependencies are missing. Run npm install before starting Pinguin.");
+}
 
 function findAvailablePort(excludedPorts = new Set()) {
   return new Promise((resolvePort, reject) => {
@@ -57,6 +63,34 @@ function waitForPort(port, timeoutMs = 20_000) {
     }
 
     tryConnect();
+  });
+}
+
+function waitForAuthInfo(corePort, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+
+  return new Promise((resolveAuthInfo, reject) => {
+    function tryRead() {
+      try {
+        const authInfo = JSON.parse(readFileSync(authInfoPath, "utf-8"));
+        if (
+          authInfo.nlPort === corePort &&
+          typeof authInfo.nlToken === "string" &&
+          typeof authInfo.nlConnectToken === "string"
+        ) {
+          resolveAuthInfo(authInfo);
+          return;
+        }
+      } catch {}
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error("Timed out waiting for Neutralino auth info."));
+        return;
+      }
+      setTimeout(tryRead, 100);
+    }
+
+    tryRead();
   });
 }
 
@@ -118,11 +152,13 @@ if (process.argv.includes("--dry-run")) {
 rmSync(authInfoPath, { force: true });
 let viteProcess;
 let coreProcess;
+let backendProcess;
 let cleanedUp = false;
 
 function cleanup() {
   if (cleanedUp) return;
   cleanedUp = true;
+  if (backendProcess?.exitCode === null) backendProcess.kill();
   if (coreProcess?.exitCode === null) coreProcess.kill();
   if (viteProcess?.exitCode === null) viteProcess.kill();
 }
@@ -183,6 +219,48 @@ coreProcess.on("error", (err) => {
   console.error(`Failed to start Neutralino: ${err.message}`);
   process.exit(1);
 });
+
+let authInfo;
+try {
+  authInfo = await waitForAuthInfo(corePort);
+} catch (err) {
+  cleanup();
+  console.error(`Failed to launch Pinguin: ${err.message}`);
+  process.exit(1);
+}
+
+console.log("Starting Pinguin backend.");
+backendProcess = spawn(process.execPath, [backendEntry], {
+  cwd: process.cwd(),
+  stdio: ["pipe", "inherit", "inherit"],
+  windowsHide: true,
+});
+
+backendProcess.on("error", (err) => {
+  cleanup();
+  console.error(`Failed to start Pinguin backend: ${err.message}`);
+  process.exit(1);
+});
+
+backendProcess.on("exit", (code, signal) => {
+  if (cleanedUp) return;
+  console.error(
+    signal
+      ? `Pinguin backend stopped from signal ${signal}.`
+      : `Pinguin backend stopped with code ${code ?? 0}.`
+  );
+  cleanup();
+  process.exit(code || 1);
+});
+
+backendProcess.stdin.end(
+  JSON.stringify({
+    nlPort: authInfo.nlPort,
+    nlToken: authInfo.nlToken,
+    nlConnectToken: authInfo.nlConnectToken,
+    nlExtensionId: backendExtensionId,
+  })
+);
 
 coreProcess.on("exit", (code, signal) => {
   console.log(

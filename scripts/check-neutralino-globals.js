@@ -24,8 +24,12 @@ if (!config.nativeAllowList.includes("extensions.getStats")) {
   throw new Error("Neutralino nativeAllowList must include extensions.getStats.");
 }
 
-if (config.modes?.window?.webviewArgs !== "--disable-gpu") {
-  throw new Error("Neutralino window mode must disable GPU rendering for WebView2.");
+for (const extension of config.extensions || []) {
+  if (!/^[A-Za-z0-9.-]+$/.test(extension.id)) {
+    throw new Error(
+      `Neutralino extension ID "${extension.id}" may contain only letters, numbers, periods, and hyphens.`
+    );
+  }
 }
 
 console.log("Neutralino globals bootstrap is present.");

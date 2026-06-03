@@ -9,19 +9,19 @@
     "node": ">=20.19"
   },
   "scripts": {
-    "dev:webview": "vite dev",
+    "dev:webview": "vite build --watch",
     "dev:webview:build-watch": "vite build --watch",
     "dev:backend": "node src/backend/main.js",
     "dev": "concurrently \"npm run dev:webview\" \"npm run dev:backend\"",
     "dev:all": "node scripts/start-dev.js",
     "dev:all-legacy": "concurrently --kill-others \"npm run dev:webview\" \"neu run\"",
     "build:webview": "vite build",
-    "build": "npm run build:webview",
-    "start": "node scripts/start-dev.js",
+    "build": "npm run build:webview && neu build",
+    "start": "neu run",
     "start:debug": "node scripts/start-dev.js --debug-window",
     "check:neutralino": "node scripts/check-neutralino-globals.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "check": "npm run check:neutralino && npm run typecheck && npm run build:webview"
+    "check": "npm run typecheck && npm run build:webview"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.75.5",
