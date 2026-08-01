@@ -1084,6 +1084,11 @@ ws.addEventListener("open", async () => {
 
     // Check for updates (non-blocking, silent)
     checkForUpdate().catch((e) => log(`Initial update check failed: ${e.message}`, "ERROR"));
+
+    // Periodically re-check for updates every 5 minutes
+    setInterval(() => {
+      checkForUpdate().catch((e) => log(`Periodic update check failed: ${e.message}`, "ERROR"));
+    }, 5 * 60 * 1000);
   } catch (err) {
     log(`Fatal: ${err.message}`, "ERROR");
     // Surface to webview instead of exiting silently.
