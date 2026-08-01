@@ -267,6 +267,14 @@ function initBridge() {
     }
   });
 
+  // ── Window close: exit the app cleanly so the Node extension is killed ──
+  Neutralino.events.on("windowClose", () => {
+    console.log("[pi-gui] windowClose — calling app.exit()");
+    Neutralino!.app.exit().catch((err: any) =>
+      console.error("[pi-gui] app.exit() failed:", err)
+    );
+  });
+
   // Built webview assets changed — auto-reload the page to pick up new code.
   Neutralino.events.on("pi:webview_reload", () => {
     console.log("[pi-gui] Webview resources changed — reloading page");

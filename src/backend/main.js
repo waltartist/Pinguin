@@ -32,10 +32,15 @@ function removeConnectionCache() {
 }
 
 // ── Cleanup on crash / signal so the temp file with tokens doesn't linger ──
-process.on("exit", removeConnectionCache);
+function cleanup() {
+  removeConnectionCache();
+  if (backendWatcher) { try { backendWatcher.close(); } catch {} }
+  if (resourcesIndex) { try { fs.unwatchFile(resourcesIndex); } catch {} }
+}
+process.on("exit", cleanup);
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
-    removeConnectionCache();
+    cleanup();
     process.exit(0);
   });
 }
@@ -399,9 +404,10 @@ async function handleWebviewInput(data) {
 
 // ── File watcher: detect backend source changes and prompt
 //    the webview to show a Reload button (user clicks to trigger reload).
+let backendWatcher = null;
 try {
   const watchDir = path.dirname(fileURLToPath(import.meta.url));
-  fs.watch(watchDir, { recursive: true }, (eventType, filename) => {
+  backendWatcher = fs.watch(watchDir, { recursive: true }, (eventType, filename) => {
     if (!filename || filename.startsWith(".")) return;
     log(`File changed: ${filename} — broadcasting pi:reload`);
     broadcastToApp("pi:reload", {}).catch((e) =>
@@ -417,11 +423,12 @@ try {
 //    instead of fs.watch because the sync-resources Vite plugin atomically
 //    swaps the resources/ directory (delete + rename), which breaks
 //    fs.watch watchers on the directory itself.
+let resourcesIndex = null;
 try {
   const projectRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)), "..", ".."
   );
-  const resourcesIndex = path.join(projectRoot, "resources", "index.html");
+  resourcesIndex = path.join(projectRoot, "resources", "index.html");
   let lastWebviewReload = 0;
   fs.watchFile(resourcesIndex, { interval: 2000 }, () => {
     const now = Date.now();
@@ -816,9 +823,10 @@ ws.addEventListener("message", (event) => {
 });
 
 ws.addEventListener("close", () => {
-  removeConnectionCache();
+  cleanup();
   log("Connection closed — exiting");
-  process.exit(0);
+  // Force exit in case file watchers or other handles keep the loop alive
+  setTimeout(() => process.exit(0), 100);
 });
 
 ws.addEventListener("error", (err) => {

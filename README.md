@@ -1,10 +1,12 @@
 # Pinguin
 
+<p align="center">
+  <img src="resources/assets/pinguin.png" alt="Pinguin" width="128" />
+</p>
+
 Pinguin is a desktop GUI for the
 [Pi coding agent](https://github.com/earendil-works/pi). It uses a lightweight
 Neutralinojs desktop shell, a React webview, and the Pi SDK.
-
-## Beta Status
 
 The chat view — streaming transcript, model
 selection, slash commands, thinking blocks, tool call rendering, and
