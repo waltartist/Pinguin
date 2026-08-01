@@ -29,6 +29,10 @@ export function Composer() {
   const error = usePi((s) => s.error);
   const sendPrompt = usePi((s) => s.sendPrompt);
   const abort = usePi((s) => s.abort);
+  const steer = usePi((s) => s.steer);
+  const followUp = usePi((s) => s.followUp);
+  const clearQueue = usePi((s) => s.clearQueue);
+  const queue = usePi((s) => s.queue);
   const model = usePi((s) => s.model);
   const commands = usePi((s) => s.commands);
   const availableModels = usePi((s) => s.availableModels);
@@ -235,7 +239,15 @@ export function Composer() {
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text) return;
+    if (isStreaming) {
+      // While streaming, Enter sends a steering message (interrupts the agent)
+      steer(text);
+      setInput("");
+      setCaret(0);
+      textareaRef.current?.focus();
+      return;
+    }
     sendPrompt(text);
     setInput("");
     setCaret(0);
@@ -321,7 +333,24 @@ export function Composer() {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (e.altKey && isStreaming) {
+        // Alt+Enter while streaming = follow-up (queue for after agent finishes)
+        const text = input.trim();
+        if (text) {
+          followUp(text);
+          setInput("");
+          setCaret(0);
+          textareaRef.current?.focus();
+        }
+        return;
+      }
       handleSend();
+    }
+    // Escape while streaming with no popups open = clear queue + restore to editor
+    if (e.key === "Escape" && isStreaming && !modelOpen && !slashOpen && !atOpen) {
+      e.preventDefault();
+      clearQueue();
+      return;
     }
   };
 
@@ -363,14 +392,24 @@ export function Composer() {
           onClick={syncCaret}
           onSelect={syncCaret}
           onKeyDown={handleKeyDown}
-          placeholder={isReady ? "Ask Pi…  (type @ to attach files)" : "Starting Pi…"}
+          placeholder={isReady ? (isStreaming ? "Steer the agent…  (Alt+Enter to queue, Esc to restore)" : "Ask Pi…  (type @ to attach files)") : "Starting Pi…"}
           disabled={!isReady}
         />
         <div className="composer-actions">
           {isStreaming ? (
-            <button className="btn btn-abort" onClick={abort}>
-              Stop
-            </button>
+            <>
+              <button
+                className="btn btn-send"
+                onClick={handleSend}
+                disabled={!isReady || !input.trim()}
+                title="Send as steering message (interrupts the agent)"
+              >
+                Steer <Icon.Send width={11} height={11} />
+              </button>
+              <button className="btn btn-abort" onClick={abort} title="Stop the agent">
+                Stop
+              </button>
+            </>
           ) : (
             <button
               className="btn btn-send"
@@ -411,6 +450,42 @@ export function Composer() {
           >
             <span className="status-dim">{model.provider}:</span>
             {model.id}
+          </span>
+        </div>
+      )}
+      {/* Queue indicator — show pending steering & follow-up messages */}
+      {(queue.steering.length > 0 || queue.followUp.length > 0) && (
+        <div style={{ paddingLeft: 2, marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {queue.steering.length > 0 && (
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent)",
+                background: "var(--bg-elevated)",
+                padding: "2px 8px",
+                borderRadius: 4,
+              }}
+            >
+              ⚡ {queue.steering.length} steering
+            </span>
+          )}
+          {queue.followUp.length > 0 && (
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-muted)",
+                background: "var(--bg-elevated)",
+                padding: "2px 8px",
+                borderRadius: 4,
+              }}
+            >
+              ⏳ {queue.followUp.length} queued
+            </span>
+          )}
+          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+            Esc to restore
           </span>
         </div>
       )}

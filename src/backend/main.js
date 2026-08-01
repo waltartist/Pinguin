@@ -133,6 +133,13 @@ function subscribeSession() {
     if (event.type === "agent_end" || event.type === "message_end") {
       broadcastSessionStats();
     }
+    // Broadcast queue updates (steering & follow-up messages)
+    if (event.type === "queue_update") {
+      broadcastToApp("pi:queue_update", {
+        steering: [...event.steering],
+        followUp: [...event.followUp],
+      }).catch((e) => log(`Broadcast queue_update failed: ${e.message}`, "ERROR"));
+    }
   });
 }
 
@@ -401,6 +408,36 @@ async function handleWebviewInput(data) {
     } else if (type === "importSession") {
       // /import — import a JSONL session file
       await handleImportSession(payload?.filePath);
+    } else if (type === "steer") {
+      // Steering message — interrupt the agent while streaming
+      if (session && session.isStreaming) {
+        try {
+          await session.steer(payload?.message || "", { images: payload?.images || [] });
+        } catch (err) {
+          log(`steer failed: ${err.message}`, "ERROR");
+          await broadcastToApp("pi:notice", { text: err.message || String(err), isError: true });
+        }
+      }
+    } else if (type === "followUp") {
+      // Follow-up message — queue for after agent finishes
+      if (session && session.isStreaming) {
+        try {
+          await session.followUp(payload?.message || "", { images: payload?.images || [] });
+        } catch (err) {
+          log(`followUp failed: ${err.message}`, "ERROR");
+          await broadcastToApp("pi:notice", { text: err.message || String(err), isError: true });
+        }
+      }
+    } else if (type === "clearQueue") {
+      // Escape — restore queued messages to the editor
+      if (session) {
+        const queued = session.clearQueue();
+        await broadcastToApp("pi:queue_cleared", { steering: queued.steering, followUp: queued.followUp });
+      }
+    } else if (type === "setSteeringMode") {
+      if (session) session.setSteeringMode(payload?.mode || "all");
+    } else if (type === "setFollowUpMode") {
+      if (session) session.setFollowUpMode(payload?.mode || "all");
     } else if (type === "reload_backend") {
       // User clicked "Reload" in the frontend.
       // Spawn a fresh process that inherits our stdio pipes, then exit.

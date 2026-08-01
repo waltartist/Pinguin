@@ -23,10 +23,10 @@ GUI equivalents.
 
 | Feature | TUI | GUI Status |
 |---------|-----|------------|
-| Steering message — type Enter while agent streams | ✅ | ❌ Not implemented |
-| Follow-up message — Alt+Enter queues for after agent finishes | ✅ | ❌ Not implemented |
-| Escape to restore queued messages back to editor | ✅ | ❌ Not implemented |
-| Configure steering/follow-up delivery via settings | ✅ | ❌ Not wired |
+| Steering message — type Enter while agent streams | ✅ | ✅ Enter while streaming sends steering message |
+| Follow-up message — Alt+Enter queues for after agent finishes | ✅ | ✅ Alt+Enter while streaming queues follow-up |
+| Escape to restore queued messages back to editor | ✅ | ✅ Esc clears queue and restores text to composer |
+| Configure steering/follow-up delivery via settings | ✅ | ✅ setSteeringMode / setFollowUpMode wired to backend |
 
 ---
 

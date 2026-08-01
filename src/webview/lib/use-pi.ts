@@ -202,6 +202,21 @@ function initBridge() {
     }
   });
 
+  // ── Message queue events (steering & follow-up) ──
+  Neutralino.events.on("pi:queue_update", (raw: any) => {
+    const { steering, followUp } = raw?.detail || {};
+    if (Array.isArray(steering) && Array.isArray(followUp)) {
+      usePiStore.getState()._setQueue(steering, followUp);
+    }
+  });
+
+  Neutralino.events.on("pi:queue_cleared", (raw: any) => {
+    const { steering, followUp } = raw?.detail || {};
+    if (Array.isArray(steering) && Array.isArray(followUp)) {
+      usePiStore.getState()._setQueueCleared(steering, followUp);
+    }
+  });
+
   Neutralino.events.on("pi:reset", (raw: any) => {
     const cwd = raw?.detail?.cwd;
     usePiStore.getState()._resetMessages();

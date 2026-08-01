@@ -165,6 +165,13 @@ export type SessionView =
   | { kind: "tree"; tree: SessionTreeNode[]; leafId: string | null; loading: boolean }
   | { kind: "import" };
 
+export interface QueueState {
+  steering: string[];
+  followUp: string[];
+  steeringMode: "all" | "one-at-a-time";
+  followUpMode: "all" | "one-at-a-time";
+}
+
 interface PiState {
   isReady: boolean;
   messages: Message[];
@@ -183,6 +190,7 @@ interface PiState {
   login: LoginState;
   update: UpdateState;
   sessionView: SessionView;
+  queue: QueueState;
 }
 
 interface PiActions {
@@ -237,6 +245,14 @@ interface PiActions {
   cloneCurrent: () => void;
   navigateToNode: (entryId: string, summarize: boolean) => void;
   importFromFile: (filePath: string) => void;
+  // Message queue (steering & follow-up)
+  steer: (text: string) => void;
+  followUp: (text: string) => void;
+  clearQueue: () => void;
+  _setQueue: (steering: string[], followUp: string[]) => void;
+  _setQueueCleared: (steering: string[], followUp: string[]) => void;
+  setSteeringMode: (mode: "all" | "one-at-a-time") => void;
+  setFollowUpMode: (mode: "all" | "one-at-a-time") => void;
 }
 
 export const usePiStore = create<PiState & PiActions>()((set, get) => ({
@@ -257,6 +273,7 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   login: { active: false, step: "idle", providerId: null, providerName: null, authType: null, prompt: null, notify: null, error: null },
   update: { available: false, localVersion: null, remoteVersion: null, running: false, step: null, stepStatus: "idle", error: null },
   sessionView: { kind: "closed" },
+  queue: { steering: [], followUp: [], steeringMode: "all", followUpMode: "all" },
 
   sendPrompt: (text) => {
     if (!get().isReady || get().isStreaming) return;
@@ -557,5 +574,46 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
       payload: { filePath },
     });
     set({ sessionView: { kind: "closed" } });
+  },
+
+  // ── Message queue actions (steering & follow-up) ──
+  steer: (text) => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "steer",
+      payload: { message: text },
+    });
+  },
+  followUp: (text) => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "followUp",
+      payload: { message: text },
+    });
+  },
+  clearQueue: () => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "clearQueue" });
+  },
+  _setQueue: (steering, followUp) =>
+    set((s) => ({ queue: { ...s.queue, steering, followUp } })),
+  _setQueueCleared: (steering, followUp) => {
+    // Restore queued messages to the composer — concatenate all queued text
+    const allText = [...steering, ...followUp].join("\n\n");
+    set((s) => ({
+      queue: { ...s.queue, steering: [], followUp: [] },
+      pendingComposerInput: allText || null,
+    }));
+  },
+  setSteeringMode: (mode) => {
+    set((s) => ({ queue: { ...s.queue, steeringMode: mode } }));
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "setSteeringMode",
+      payload: { mode },
+    });
+  },
+  setFollowUpMode: (mode) => {
+    set((s) => ({ queue: { ...s.queue, followUpMode: mode } }));
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "setFollowUpMode",
+      payload: { mode },
+    });
   },
 }));
