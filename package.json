@@ -25,7 +25,7 @@
     "check": "npm run typecheck && npm run build:webview"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.82.0",
+    "@earendil-works/pi-coding-agent": "^0.82.1",
     "@neutralinojs/lib": "^6.7.0",
     "dockview-react": "^4.13.1",
     "esbuild": "0.28.0",
