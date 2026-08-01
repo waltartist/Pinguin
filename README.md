@@ -1,19 +1,16 @@
 # Pinguin
 
-Pinguin is a beta desktop GUI for the
+Pinguin is a desktop GUI for the
 [Pi coding agent](https://github.com/earendil-works/pi). It uses a lightweight
 Neutralinojs desktop shell, a React webview, and the Pi SDK.
 
 ## Beta Status
 
-Pinguin is an early beta. The chat view — streaming transcript, model
+The chat view — streaming transcript, model
 selection, slash commands, thinking blocks, tool call rendering, and
 project-local GUI extensions — is the primary interface. Some Pi terminal
 features are still missing. See [`docs/TODO.md`](docs/TODO.md) for the
 current gap list.
-
-The supported beta distribution is a source install. Standalone application
-downloads are planned after the backend packaging is complete.
 
 ## Prerequisites
 
@@ -95,7 +92,6 @@ before adding it.
 
 ## Known Limitations
 
-- Standalone downloadable application archives are not ready yet.
 - GUI extensions are currently loaded only from this repository's
   `gui-extensions/` directory.
 - Some Pi terminal features do not yet have GUI equivalents.
