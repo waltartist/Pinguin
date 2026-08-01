@@ -1,8 +1,12 @@
 // src/backend/pi-bridge.js
-// Creates the Pi agent session via the SDK.
+// Creates the Pi agent session runtime via the SDK.
 // Pi is installed with Pinguin so a clone works consistently across platforms.
 // The project-root SYSTEM.md is loaded as the Pi system prompt so that the
 // bundled Pi instance automatically uses Pinguin's UI conventions.
+//
+// We use createAgentSessionRuntime() instead of createAgentSession() so we
+// get an AgentSessionRuntime with switchSession(), fork(), importFromJsonl(),
+// and newSession() — needed for /resume, /fork, /clone, /import, and /tree.
 
 import path from "node:path";
 import os from "node:os";
@@ -29,15 +33,51 @@ export async function createPiSession() {
   // Sync extension docs/types into project-local gui-extensions/
   installExtensionDocs();
 
-  const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
+  const {
+    createAgentSessionRuntime,
+    createAgentSessionServices,
+    createAgentSessionFromServices,
+    SessionManager,
+  } = await import("@earendil-works/pi-coding-agent");
 
+  const agentDir = path.join(os.homedir(), ".pi", "agent");
+  const cwd = process.cwd();
   const systemPrompt = loadSystemPrompt();
 
-  const { session } = await createAgentSession({
-    cwd: process.cwd(),
-    agentDir: path.join(os.homedir(), ".pi", "agent"),
-    ...(systemPrompt ? { systemPrompt } : {}),
+  // Initial session manager — continue most recent or create new
+  const sessionManager = SessionManager.continueRecent(cwd);
+
+  // Runtime factory: called for initial session AND for every session switch
+  // (resume, fork, clone, import). Recreates cwd-bound services + session.
+  const createRuntime = async ({ cwd: rtCwd, agentDir: rtAgentDir, sessionManager: rtSm, sessionStartEvent }) => {
+    const services = await createAgentSessionServices({
+      cwd: rtCwd,
+      agentDir: rtAgentDir,
+      resourceLoaderOptions: systemPrompt
+        ? { systemPrompt }
+        : undefined,
+    });
+
+    const created = await createAgentSessionFromServices({
+      services,
+      sessionManager: rtSm,
+      sessionStartEvent,
+    });
+
+    return {
+      ...created,
+      services,
+      diagnostics: services.diagnostics ?? [],
+    };
+  };
+
+  const runtime = await createAgentSessionRuntime(createRuntime, {
+    cwd,
+    agentDir,
+    sessionManager,
   });
 
-  return session;
+  // Return both — main.js needs the runtime for session management,
+  // but most code still talks to session directly.
+  return { session: runtime.session, runtime };
 }

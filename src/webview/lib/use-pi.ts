@@ -173,6 +173,35 @@ function initBridge() {
     usePiStore.getState()._setStreaming(false);
   });
 
+  // ── Session management events ──
+  Neutralino.events.on("pi:sessions", (raw: any) => {
+    const { sessions, allSessions } = raw?.detail || {};
+    if (Array.isArray(sessions) && Array.isArray(allSessions)) {
+      usePiStore.getState()._setSessions(sessions, allSessions);
+    }
+  });
+
+  Neutralino.events.on("pi:fork_messages", (raw: any) => {
+    const messages = raw?.detail?.messages;
+    if (Array.isArray(messages)) {
+      usePiStore.getState()._setForkMessages(messages);
+    }
+  });
+
+  Neutralino.events.on("pi:session_tree", (raw: any) => {
+    const { tree, leafId } = raw?.detail || {};
+    if (Array.isArray(tree)) {
+      usePiStore.getState()._setSessionTree(tree, leafId ?? null);
+    }
+  });
+
+  Neutralino.events.on("pi:composer_input", (raw: any) => {
+    const text = raw?.detail?.text;
+    if (typeof text === "string") {
+      usePiStore.getState()._setPendingComposerInput(text);
+    }
+  });
+
   Neutralino.events.on("pi:reset", (raw: any) => {
     const cwd = raw?.detail?.cwd;
     usePiStore.getState()._resetMessages();

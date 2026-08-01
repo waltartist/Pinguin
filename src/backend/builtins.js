@@ -222,12 +222,69 @@ export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands
       },
     },
 
-    // ── Stubs for Pi CLI commands not yet available in GUI ──
-    { name: "import", description: "Import a session or file", args: "<path>", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
-    { name: "share", description: "Share the current session", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
-    { name: "fork", description: "Fork the current session", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
-    { name: "clone", description: "Clone a shared session", args: "<id>", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
-    { name: "tree", description: "Show file tree", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
+    // ── Session management commands ──
+    // /resume, /fork, /tree, /import dispatch UI events to the frontend,
+    // which renders an interactive selector. /clone is a one-shot operation.
+    {
+      name: "resume",
+      description: "Browse and resume a previous session",
+      run: async () => {
+        return {
+          event: "pi:ui_command",
+          eventData: { verb: "resume" },
+        };
+      },
+    },
+    {
+      name: "fork",
+      description: "Fork from an earlier user message",
+      run: async () => {
+        return {
+          event: "pi:ui_command",
+          eventData: { verb: "fork" },
+        };
+      },
+    },
+    {
+      name: "clone",
+      description: "Clone current branch into a new session",
+      run: async () => {
+        return {
+          event: "pi:ui_command",
+          eventData: { verb: "clone" },
+        };
+      },
+    },
+    {
+      name: "tree",
+      description: "Session tree navigation",
+      run: async () => {
+        return {
+          event: "pi:ui_command",
+          eventData: { verb: "tree" },
+        };
+      },
+    },
+    {
+      name: "import",
+      description: "Import a session from a JSONL file",
+      args: "[path]",
+      run: async (_ctx, args) => {
+        const trimmed = args?.trim();
+        if (trimmed) {
+          // Direct import with path argument — no UI needed
+          return {
+            event: "pi:ui_command",
+            eventData: { verb: "import", target: trimmed },
+          };
+        }
+        // No path — show import dialog
+        return {
+          event: "pi:ui_command",
+          eventData: { verb: "import" },
+        };
+      },
+    },
     { name: "login", description: "Log in to a provider", args: "[provider]", run: async (_ctx, args) => {
       // The frontend handles the interactive login UI.
       // If a provider is specified, jump straight to that provider.
@@ -242,7 +299,7 @@ export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands
         eventData: { verb: "logout", target: args?.trim() || "" },
       };
     } },
-    { name: "resume", description: "Resume a previous session", args: "<id>", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
+
 
     // ── UI control surface (Fix 7) ──
     {

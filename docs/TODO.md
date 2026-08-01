@@ -11,11 +11,11 @@ GUI equivalents.
 
 | Feature | TUI | GUI Status |
 |---------|-----|------------|
-| `/resume` — browse & select from previous sessions | ✅ Full interactive choose list | ❌ Stub only |
-| `/fork` — create new session from earlier user message | ✅ Full implementation | ❌ Stub only |
-| `/clone` — duplicate active branch into new session | ✅ Full implementation | ❌ Stub only |
-| `/tree` — session tree navigation & branch visualization | ✅ Full implementation | ❌ Stub only |
-| `/import` — import a session or file | ✅ Full implementation | ❌ Stub only |
+| `/resume` — browse & select from previous sessions | ✅ Full interactive choose list | ✅ Session list overlay with filtering |
+| `/fork` — create new session from earlier user message | ✅ Full implementation | ✅ User message selector overlay |
+| `/clone` — duplicate active branch into new session | ✅ Full implementation | ✅ One-shot command (no UI needed) |
+| `/tree` — session tree navigation & branch visualization | ✅ Full implementation | ✅ Tree view overlay with navigation |
+| `/import` — import a session or file | ✅ Full implementation | ✅ File path input dialog |
 
 ---
 

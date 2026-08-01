@@ -1,6 +1,7 @@
 import { usePi } from "./lib/use-pi";
 import { Shell } from "./components/dock/Shell";
 import { LoginPanel } from "./components/LoginPanel";
+import { SessionPanel } from "./components/SessionPanel";
 import "./components/ExtensionHost";
 
 export function App() {
@@ -9,6 +10,7 @@ export function App() {
   const retryConnect = usePi((s) => s.retryConnect);
   const model = usePi((s) => s.model);
   const login = usePi((s) => s.login);
+  const sessionView = usePi((s) => s.sessionView);
   const _loginStart = usePi((s) => s._loginStart);
 
   if (!isReady) {
@@ -34,7 +36,8 @@ export function App() {
     <>
       <Shell />
       {login.active && <LoginPanel />}
-      {!model && !login.active && (
+      {sessionView.kind !== "closed" && <SessionPanel />}
+      {!model && !login.active && sessionView.kind === "closed" && (
         <div className="no-model-overlay" onClick={(e) => e.stopPropagation()}>
           <div className="no-model-panel">
             <h2>No model configured</h2>

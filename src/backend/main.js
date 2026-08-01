@@ -109,8 +109,12 @@ function broadcastToApp(event, data) {
   return callMethod("app.broadcast", { event, data });
 }
 
-// Module-level Pi session reference (set once on connect, replaced on /new)
+// Module-level Pi session + runtime references.
+// `session` is the current AgentSession (replaced on /new, /resume, /fork, etc.).
+// `runtime` is the AgentSessionRuntime that owns session lifecycle — needed for
+// switchSession(), fork(), importFromJsonl(), and newSession().
 let session = null;
+let runtime = null;
 let sessionUnsub = null;
 
 const registry = createBuiltinRegistry({
@@ -250,6 +254,10 @@ async function tryBuiltin(text) {
   if (result?._recreateSession) {
     if (sessionUnsub) sessionUnsub();
     session = result._recreateSession;
+    // If the builtin returned a new runtime, update our reference.
+    if (result._recreateRuntime) {
+      runtime = result._recreateRuntime;
+    }
     subscribeSession();
     await broadcastToApp("pi:reset", { cwd: process.cwd() });
     await broadcastCommands();
@@ -369,6 +377,30 @@ async function handleWebviewInput(data) {
     } else if (type === "runUpdate") {
       // User clicked the Update button
       await runUpdate();
+    } else if (type === "listSessions") {
+      // /resume — list previous sessions for the current cwd
+      await handleListSessions();
+    } else if (type === "resumeSession") {
+      // User selected a session to resume
+      await handleResumeSession(payload?.sessionPath);
+    } else if (type === "getForkMessages") {
+      // /fork — get user messages for fork selector
+      await handleGetForkMessages();
+    } else if (type === "forkSession") {
+      // User selected a message to fork from
+      await handleForkSession(payload?.entryId);
+    } else if (type === "cloneSession") {
+      // /clone — clone current branch
+      await handleCloneSession();
+    } else if (type === "getSessionTree") {
+      // /tree — get session tree for visualization
+      await handleGetSessionTree();
+    } else if (type === "navigateTree") {
+      // User selected a tree node to navigate to
+      await handleNavigateTree(payload?.entryId, payload?.summarize);
+    } else if (type === "importSession") {
+      // /import — import a JSONL session file
+      await handleImportSession(payload?.filePath);
     } else if (type === "reload_backend") {
       // User clicked "Reload" in the frontend.
       // Spawn a fresh process that inherits our stdio pipes, then exit.
@@ -731,6 +763,247 @@ async function handleLogout(providerId) {
   }
 }
 
+// ── Session management handlers ─────────────────────────────────────────────
+// These implement /resume, /fork, /clone, /tree, and /import by delegating
+// to the AgentSessionRuntime. After a session switch, we re-subscribe to
+// events, broadcast pi:reset to clear the transcript, and refresh state.
+
+async function afterSessionSwitch() {
+  // Update our session reference from the runtime
+  if (sessionUnsub) sessionUnsub();
+  session = runtime.session;
+  subscribeSession();
+  await broadcastToApp("pi:reset", { cwd: runtime.cwd });
+  await broadcastCommands();
+  await broadcastModels();
+  await broadcastProviders();
+  broadcastSessionStats();
+  // Broadcast current model
+  if (session.model) {
+    await broadcastToApp("pi:model", {
+      model: { provider: session.model.provider, id: session.model.id },
+    });
+  }
+}
+
+async function handleListSessions() {
+  if (!runtime) return;
+  try {
+    const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+    const sm = session.sessionManager;
+    const cwd = sm.getCwd();
+    const sessionDir = sm.getSessionDir();
+    const sessions = await SessionManager.list(cwd, sessionDir);
+    const allSessions = sm.usesDefaultSessionDir()
+      ? await SessionManager.listAll()
+      : await SessionManager.listAll(sessionDir);
+    // Mark the current session
+    const currentFile = sm.getSessionFile();
+    const serialized = sessions.map((s) => ({
+      path: s.path,
+      id: s.id,
+      name: s.name || null,
+      cwd: s.cwd,
+      created: s.created.toISOString(),
+      modified: s.modified.toISOString(),
+      messageCount: s.messageCount,
+      firstMessage: s.firstMessage,
+      isCurrent: s.path === currentFile,
+    }));
+    const serializedAll = allSessions
+      .filter((s) => !serialized.some((x) => x.path === s.path))
+      .map((s) => ({
+        path: s.path,
+        id: s.id,
+        name: s.name || null,
+        cwd: s.cwd,
+        created: s.created.toISOString(),
+        modified: s.modified.toISOString(),
+        messageCount: s.messageCount,
+        firstMessage: s.firstMessage,
+        isCurrent: s.path === currentFile,
+      }));
+    await broadcastToApp("pi:sessions", { sessions: serialized, allSessions: serializedAll });
+  } catch (err) {
+    log(`handleListSessions failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to list sessions: ${err.message}`, isError: true });
+  }
+}
+
+async function handleResumeSession(sessionPath) {
+  if (!runtime || !sessionPath) return;
+  try {
+    const result = await runtime.switchSession(sessionPath);
+    if (result.cancelled) {
+      await broadcastToApp("pi:notice", { text: "Resume cancelled" });
+      return;
+    }
+    await afterSessionSwitch();
+    await broadcastToApp("pi:notice", { text: "Resumed session" });
+    await broadcastToApp("pi:command_done", {});
+  } catch (err) {
+    log(`handleResumeSession failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to resume: ${err.message}`, isError: true });
+    await broadcastToApp("pi:command_done", {});
+  }
+}
+
+async function handleGetForkMessages() {
+  if (!session) return;
+  try {
+    const messages = session.getUserMessagesForForking();
+    await broadcastToApp("pi:fork_messages", { messages });
+  } catch (err) {
+    log(`handleGetForkMessages failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to get fork messages: ${err.message}`, isError: true });
+  }
+}
+
+async function handleForkSession(entryId) {
+  if (!runtime || !entryId) return;
+  try {
+    const result = await runtime.fork(entryId);
+    if (result.cancelled) {
+      await broadcastToApp("pi:notice", { text: "Fork cancelled" });
+      await broadcastToApp("pi:command_done", {});
+      return;
+    }
+    await afterSessionSwitch();
+    await broadcastToApp("pi:notice", { text: "Forked to new session" });
+    // If there's selected text (the forked user message), send it to the composer
+    if (result.selectedText) {
+      await broadcastToApp("pi:composer_input", { text: result.selectedText });
+    }
+    await broadcastToApp("pi:command_done", {});
+  } catch (err) {
+    log(`handleForkSession failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to fork: ${err.message}`, isError: true });
+    await broadcastToApp("pi:command_done", {});
+  }
+}
+
+async function handleCloneSession() {
+  if (!runtime || !session) return;
+  const leafId = session.sessionManager.getLeafId();
+  if (!leafId) {
+    await broadcastToApp("pi:notice", { text: "Nothing to clone yet", isError: true });
+    await broadcastToApp("pi:command_done", {});
+    return;
+  }
+  try {
+    const result = await runtime.fork(leafId, { position: "at" });
+    if (result.cancelled) {
+      await broadcastToApp("pi:notice", { text: "Clone cancelled" });
+      await broadcastToApp("pi:command_done", {});
+      return;
+    }
+    await afterSessionSwitch();
+    await broadcastToApp("pi:notice", { text: "Cloned to new session" });
+    await broadcastToApp("pi:command_done", {});
+  } catch (err) {
+    log(`handleCloneSession failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to clone: ${err.message}`, isError: true });
+    await broadcastToApp("pi:command_done", {});
+  }
+}
+
+async function handleGetSessionTree() {
+  if (!session) return;
+  try {
+    const sm = session.sessionManager;
+    const tree = sm.getTree();
+    const leafId = sm.getLeafId();
+    // Serialize the tree for the frontend
+    function serializeNode(node) {
+      return {
+        entryId: node.entry.id,
+        type: node.entry.type,
+        role: node.entry.type === "message" ? node.entry.message?.role : undefined,
+        text: node.entry.type === "message"
+          ? (typeof node.entry.message?.content === "string"
+            ? node.entry.message.content.slice(0, 200)
+            : Array.isArray(node.entry.message?.content)
+              ? node.entry.message.content.filter((c) => c?.type === "text").map((c) => c.text).join("").slice(0, 200)
+              : "")
+          : node.entry.type === "compaction"
+            ? "[compaction]"
+            : node.entry.type === "branch_summary"
+              ? "[branch summary]"
+              : node.entry.type === "model_change"
+                ? `→ ${node.entry.provider}:${node.entry.modelId}`
+                : node.entry.type,
+        label: node.label,
+        isLeaf: node.entry.id === leafId,
+        children: node.children.map(serializeNode),
+      };
+    }
+    const serializedTree = tree.map(serializeNode);
+    await broadcastToApp("pi:session_tree", { tree: serializedTree, leafId });
+  } catch (err) {
+    log(`handleGetSessionTree failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to get tree: ${err.message}`, isError: true });
+  }
+}
+
+async function handleNavigateTree(entryId, summarize) {
+  if (!session || !entryId) return;
+  try {
+    const result = await session.navigateTree(entryId, { summarize: !!summarize });
+    if (result.cancelled) {
+      await broadcastToApp("pi:notice", { text: "Navigation cancelled" });
+      await broadcastToApp("pi:command_done", {});
+      return;
+    }
+    if (result.aborted) {
+      await broadcastToApp("pi:notice", { text: "Branch summarization cancelled" });
+      await broadcastToApp("pi:command_done", {});
+      return;
+    }
+    // After navigation, the session is the same but the context changed.
+    // Broadcast a reset to reload the transcript.
+    await broadcastToApp("pi:reset", { cwd: process.cwd() });
+    broadcastSessionStats();
+    // If there's editor text (the user message at the fork point), send to composer
+    if (result.editorText) {
+      await broadcastToApp("pi:composer_input", { text: result.editorText });
+    }
+    await broadcastToApp("pi:notice", { text: "Navigated to selected point" });
+    await broadcastToApp("pi:command_done", {});
+  } catch (err) {
+    log(`handleNavigateTree failed: ${err.message}`, "ERROR");
+    await broadcastToApp("pi:notice", { text: `Failed to navigate: ${err.message}`, isError: true });
+    await broadcastToApp("pi:command_done", {});
+  }
+}
+
+async function handleImportSession(filePath) {
+  if (!runtime || !filePath) {
+    await broadcastToApp("pi:notice", { text: "Usage: /import <path.jsonl>", isError: true });
+    await broadcastToApp("pi:command_done", {});
+    return;
+  }
+  try {
+    const result = await runtime.importFromJsonl(filePath);
+    if (result.cancelled) {
+      await broadcastToApp("pi:notice", { text: "Import cancelled" });
+      await broadcastToApp("pi:command_done", {});
+      return;
+    }
+    await afterSessionSwitch();
+    await broadcastToApp("pi:notice", { text: `Session imported from: ${filePath}` });
+    await broadcastToApp("pi:command_done", {});
+  } catch (err) {
+    log(`handleImportSession failed: ${err.message}`, "ERROR");
+    const msg = err.message || String(err);
+    if (msg.includes("File not found")) {
+      await broadcastToApp("pi:notice", { text: `File not found: ${filePath}`, isError: true });
+    } else {
+      await broadcastToApp("pi:notice", { text: `Failed to import: ${msg}`, isError: true });
+    }
+    await broadcastToApp("pi:command_done", {});
+  }
+}
+
 // ── Input queue: serialize pi:input messages so that commands
 //    (/model, /new, etc.) always complete before the next prompt
 //    is dispatched to the session.
@@ -742,7 +1015,9 @@ ws.addEventListener("open", async () => {
   log("Connected to Neutralino");
 
   try {
-    session = await createPiSession();
+    const result = await createPiSession();
+    session = result.session;
+    runtime = result.runtime;
     log("Pi session created");
 
     // All Pi events → broadcast to webview

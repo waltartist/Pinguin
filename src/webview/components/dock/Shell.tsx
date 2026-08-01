@@ -283,6 +283,12 @@ export function Shell() {
         return;
       }
 
+      // Session management verbs — open the SessionPanel overlay
+      if (verb === "resume" || verb === "fork" || verb === "tree" || verb === "import" || verb === "clone") {
+        usePiStore.getState()._openSessionView(verb, target || undefined);
+        return;
+      }
+
       if (verb === "panel") {
         if (subVerb === "open" && id) {
           const builtin = BUILTIN_PANELS.find((p) => p.id === id);

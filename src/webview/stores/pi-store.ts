@@ -129,6 +129,42 @@ export interface UpdateState {
   error: string | null;
 }
 
+// ── Session management types ──
+
+export interface SessionInfo {
+  path: string;
+  id: string;
+  name: string | null;
+  cwd: string;
+  created: string;
+  modified: string;
+  messageCount: number;
+  firstMessage: string;
+  isCurrent: boolean;
+}
+
+export interface ForkMessage {
+  entryId: string;
+  text: string;
+}
+
+export interface SessionTreeNode {
+  entryId: string;
+  type: string;
+  role?: string;
+  text: string;
+  label?: string;
+  isLeaf: boolean;
+  children: SessionTreeNode[];
+}
+
+export type SessionView =
+  | { kind: "closed" }
+  | { kind: "resume"; sessions: SessionInfo[]; allSessions: SessionInfo[]; loading: boolean }
+  | { kind: "fork"; messages: ForkMessage[]; loading: boolean }
+  | { kind: "tree"; tree: SessionTreeNode[]; leafId: string | null; loading: boolean }
+  | { kind: "import" };
+
 interface PiState {
   isReady: boolean;
   messages: Message[];
@@ -146,6 +182,7 @@ interface PiState {
   providers: ProviderInfo[];
   login: LoginState;
   update: UpdateState;
+  sessionView: SessionView;
 }
 
 interface PiActions {
@@ -189,6 +226,17 @@ interface PiActions {
   _resetUpdate: () => void;
   checkForUpdate: () => void;
   runUpdate: () => void;
+  // Session management
+  _openSessionView: (verb: string, target?: string) => void;
+  _closeSessionView: () => void;
+  _setSessions: (sessions: SessionInfo[], allSessions: SessionInfo[]) => void;
+  _setForkMessages: (messages: ForkMessage[]) => void;
+  _setSessionTree: (tree: SessionTreeNode[], leafId: string | null) => void;
+  resumeSession: (sessionPath: string) => void;
+  forkFromMessage: (entryId: string) => void;
+  cloneCurrent: () => void;
+  navigateToNode: (entryId: string, summarize: boolean) => void;
+  importFromFile: (filePath: string) => void;
 }
 
 export const usePiStore = create<PiState & PiActions>()((set, get) => ({
@@ -208,6 +256,7 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   providers: [],
   login: { active: false, step: "idle", providerId: null, providerName: null, authType: null, prompt: null, notify: null, error: null },
   update: { available: false, localVersion: null, remoteVersion: null, running: false, step: null, stepStatus: "idle", error: null },
+  sessionView: { kind: "closed" },
 
   sendPrompt: (text) => {
     if (!get().isReady || get().isStreaming) return;
@@ -426,5 +475,87 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
     });
     // Optimistically update the model display; the backend will confirm via pi:model
     set({ model: { provider: model.provider, id: model.id } });
+  },
+
+  // ── Session management actions ──
+  _openSessionView: (verb, target) => {
+    switch (verb) {
+      case "resume":
+        set({ sessionView: { kind: "resume", sessions: [], allSessions: [], loading: true } });
+        Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "listSessions" });
+        break;
+      case "fork":
+        set({ sessionView: { kind: "fork", messages: [], loading: true } });
+        Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "getForkMessages" });
+        break;
+      case "clone":
+        // Clone is a one-shot — no UI needed, just dispatch and close
+        Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "cloneSession" });
+        set({ sessionView: { kind: "closed" } });
+        break;
+      case "tree":
+        set({ sessionView: { kind: "tree", tree: [], leafId: null, loading: true } });
+        Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "getSessionTree" });
+        break;
+      case "import":
+        if (target) {
+          // Direct import with path argument
+          Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+            type: "importSession",
+            payload: { filePath: target },
+          });
+          set({ sessionView: { kind: "closed" } });
+        } else {
+          set({ sessionView: { kind: "import" } });
+        }
+        break;
+      default:
+        set({ sessionView: { kind: "closed" } });
+    }
+  },
+  _closeSessionView: () => set({ sessionView: { kind: "closed" } }),
+  _setSessions: (sessions, allSessions) =>
+    set((s) => s.sessionView.kind === "resume"
+      ? { sessionView: { ...s.sessionView, sessions, allSessions, loading: false } }
+      : s),
+  _setForkMessages: (messages) =>
+    set((s) => s.sessionView.kind === "fork"
+      ? { sessionView: { ...s.sessionView, messages, loading: false } }
+      : s),
+  _setSessionTree: (tree, leafId) =>
+    set((s) => s.sessionView.kind === "tree"
+      ? { sessionView: { ...s.sessionView, tree, leafId, loading: false } }
+      : s),
+  resumeSession: (sessionPath) => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "resumeSession",
+      payload: { sessionPath },
+    });
+    set({ sessionView: { kind: "closed" } });
+  },
+  forkFromMessage: (entryId) => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "forkSession",
+      payload: { entryId },
+    });
+    set({ sessionView: { kind: "closed" } });
+  },
+  cloneCurrent: () => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "cloneSession" });
+    set({ sessionView: { kind: "closed" } });
+  },
+  navigateToNode: (entryId, summarize) => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "navigateTree",
+      payload: { entryId, summarize },
+    });
+    set({ sessionView: { kind: "closed" } });
+  },
+  importFromFile: (filePath) => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
+      type: "importSession",
+      payload: { filePath },
+    });
+    set({ sessionView: { kind: "closed" } });
   },
 }));
