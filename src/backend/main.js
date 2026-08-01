@@ -464,19 +464,48 @@ function readLocalVersion() {
   }
 }
 
-// Simple semver-like comparison: split on "." and "-" to compare
-// numeric parts. Returns true if `remote` is newer than `local`.
+// Simple semver-like comparison: handles pre-release suffixes like
+// 0.1.0-beta.1 vs 0.1.0-beta.2. Returns true if `remote` is newer than `local`.
 function isNewerVersion(local, remote) {
   if (!local || !remote) return false;
-  const parseParts = (v) =>
-    v.split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
-  const lp = parseParts(local);
-  const rp = parseParts(remote);
-  for (let i = 0; i < Math.max(lp.length, rp.length); i++) {
-    const l = lp[i] || 0;
-    const r = rp[i] || 0;
+  const parse = (v) => {
+    const [core, pre] = v.split("-");
+    const nums = core.split(".").map((n) => parseInt(n, 10) || 0);
+    // Pre-release parts: e.g. "beta.1" -> ["beta", 1]
+    const preParts = pre ? pre.split(".").map((p, i) => {
+      const n = parseInt(p, 10);
+      return isNaN(n) ? p : n;
+    }) : null;
+    return { nums, preParts };
+  };
+  const lp = parse(local);
+  const rp = parse(remote);
+  // Compare core version numbers first
+  for (let i = 0; i < Math.max(lp.nums.length, rp.nums.length); i++) {
+    const l = lp.nums[i] || 0;
+    const r = rp.nums[i] || 0;
     if (r > l) return true;
     if (r < l) return false;
+  }
+  // Core versions are equal — compare pre-release parts
+  // No pre-release (release) > has pre-release (beta)
+  if (lp.preParts && !rp.preParts) return true;   // local is beta, remote is release → remote is newer
+  if (!lp.preParts && rp.preParts) return false;  // local is release, remote is beta → remote is NOT newer
+  if (!lp.preParts && !rp.preParts) return false; // both release, equal
+  // Both have pre-release — compare element by element
+  for (let i = 0; i < Math.max(lp.preParts.length, rp.preParts.length); i++) {
+    const l = lp.preParts[i];
+    const r = rp.preParts[i];
+    if (l === undefined) return r !== undefined;
+    if (r === undefined) return false;
+    if (typeof l === "number" && typeof r === "number") {
+      if (r > l) return true;
+      if (r < l) return false;
+    } else {
+      // String comparison for non-numeric parts (e.g. "beta" vs "alpha")
+      if (String(r) > String(l)) return true;
+      if (String(r) < String(l)) return false;
+    }
   }
   return false;
 }
