@@ -171,7 +171,7 @@ function broadcastCommands() {
 function getAvailableModels() {
   if (!session) return [];
   try {
-    return session.modelRegistry.getAvailable().map((m) => ({
+    return session.extensionRunner.getModelRegistry().getAvailable().map((m) => ({
       provider: m.provider,
       id: m.id,
       name: m.name,
@@ -275,8 +275,9 @@ async function handleWebviewInput(data) {
       const { provider, id } = payload || {};
       log(`handleWebviewInput: switchModel to ${provider}:${id}`);
       // Refresh registry to pick up models.json changes (Pi TUI does this too)
-      await session.modelRegistry.refresh();
-      const available = session.modelRegistry.getAvailable();
+      const modelRegistry = session.extensionRunner.getModelRegistry();
+      await modelRegistry.refresh();
+      const available = modelRegistry.getAvailable();
       const found = provider
         ? available.find((m) => m.provider === provider && m.id === id)
         : available.find((m) => m.id === id);
