@@ -119,6 +119,16 @@ export interface LoginState {
   error: string | null;
 }
 
+export interface UpdateState {
+  available: boolean;
+  localVersion: string | null;
+  remoteVersion: string | null;
+  running: boolean;
+  step: string | null;
+  stepStatus: "idle" | "running" | "done" | "error";
+  error: string | null;
+}
+
 interface PiState {
   isReady: boolean;
   messages: Message[];
@@ -135,6 +145,7 @@ interface PiState {
   pinnedCommands: string[];
   providers: ProviderInfo[];
   login: LoginState;
+  update: UpdateState;
 }
 
 interface PiActions {
@@ -172,6 +183,12 @@ interface PiActions {
   _loginCancel: () => void;
   _loginDone: (ok: boolean, error?: string) => void;
   _loginReset: () => void;
+  _setUpdateAvailable: (localVersion: string, remoteVersion: string) => void;
+  _setUpdateProgress: (step: string, status: "running" | "done" | "error", error?: string) => void;
+  _setUpdateDone: (ok: boolean, error?: string) => void;
+  _resetUpdate: () => void;
+  checkForUpdate: () => void;
+  runUpdate: () => void;
 }
 
 export const usePiStore = create<PiState & PiActions>()((set, get) => ({
@@ -190,6 +207,7 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   pinnedCommands: ["new", "compact", "reload"],
   providers: [],
   login: { active: false, step: "idle", providerId: null, providerName: null, authType: null, prompt: null, notify: null, error: null },
+  update: { available: false, localVersion: null, remoteVersion: null, running: false, step: null, stepStatus: "idle", error: null },
 
   sendPrompt: (text) => {
     if (!get().isReady || get().isStreaming) return;
@@ -374,6 +392,25 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   _loginReset: () => set((s) => ({
       login: { active: false, step: "idle", providerId: null, providerName: null, authType: null, prompt: null, notify: null, error: null },
     })),
+  _setUpdateAvailable: (localVersion, remoteVersion) => set((s) => ({
+      update: { ...s.update, available: true, localVersion, remoteVersion },
+    })),
+  _setUpdateProgress: (step, status, error) => set((s) => ({
+      update: { ...s.update, running: true, step, stepStatus: status, error: error ?? null },
+    })),
+  _setUpdateDone: (ok, error) => set((s) => ({
+      update: { ...s.update, running: false, step: null, stepStatus: ok ? "done" : "error", error: error ?? null, available: ok ? false : s.update.available },
+    })),
+  _resetUpdate: () => set((s) => ({
+      update: { available: false, localVersion: null, remoteVersion: null, running: false, step: null, stepStatus: "idle", error: null },
+    })),
+  checkForUpdate: () => {
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "checkUpdate" });
+  },
+  runUpdate: () => {
+    set((s) => ({ update: { ...s.update, running: true, step: "Starting…", stepStatus: "running", error: null } }));
+    Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "runUpdate" });
+  },
   requestSessionStats: () => {
     Neutralino?.extensions.dispatch("pi-backend", "pi:input", {
       type: "getStats",

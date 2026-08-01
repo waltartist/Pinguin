@@ -240,6 +240,33 @@ function initBridge() {
     usePiStore.getState()._setNeedsRestart(true);
   });
 
+  // ── Update events ──
+  Neutralino.events.on("pi:update_available", (raw: any) => {
+    const { localVersion, remoteVersion } = raw?.detail || {};
+    if (localVersion && remoteVersion) {
+      console.log(`[pi-gui] Update available: ${localVersion} → ${remoteVersion}`);
+      usePiStore.getState()._setUpdateAvailable(localVersion, remoteVersion);
+    }
+  });
+
+  Neutralino.events.on("pi:update_progress", (raw: any) => {
+    const { step, status, error } = raw?.detail || {};
+    if (step && status) {
+      console.log(`[pi-gui] Update progress: ${step} — ${status}`);
+      usePiStore.getState()._setUpdateProgress(step, status, error);
+    }
+  });
+
+  Neutralino.events.on("pi:update_done", (raw: any) => {
+    const { ok, error } = raw?.detail || {};
+    console.log(`[pi-gui] Update done: ok=${ok}`);
+    usePiStore.getState()._setUpdateDone(ok, error);
+    if (ok) {
+      // Auto-reload the page after a brief delay so the new build is picked up
+      setTimeout(() => window.location.reload(), 1500);
+    }
+  });
+
   // Built webview assets changed — auto-reload the page to pick up new code.
   Neutralino.events.on("pi:webview_reload", () => {
     console.log("[pi-gui] Webview resources changed — reloading page");

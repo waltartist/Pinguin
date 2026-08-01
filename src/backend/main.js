@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 
 // ── Connection info cache ──
 // On manual reload, the old process spawns a child and exits. The child
@@ -357,6 +357,12 @@ async function handleWebviewInput(data) {
       }
     } else if (type === "logout") {
       await handleLogout(payload?.providerId);
+    } else if (type === "checkUpdate") {
+      // Manual update check from the UI
+      await checkForUpdate(true);
+    } else if (type === "runUpdate") {
+      // User clicked the Update button
+      await runUpdate();
     } else if (type === "reload_backend") {
       // User clicked "Reload" in the frontend.
       // Spawn a fresh process that inherits our stdio pipes, then exit.
@@ -427,6 +433,135 @@ try {
   });
 } catch (err) {
   log(`Webview watcher setup failed (non-fatal): ${err.message}`, "ERROR");
+}
+
+// ── Update checker ──────────────────────────────────────────────────────────
+// Compares the local package.json version against the one on GitHub.
+// On startup and on pi:hello, it fetches the raw package.json from the
+// main branch and broadcasts pi:update_available if the remote version
+// is newer.
+
+const GITHUB_RAW_URL =
+  "https://raw.githubusercontent.com/waltartist/Pinguin/main/package.json";
+
+function readLocalVersion() {
+  try {
+    const pkgPath = path.join(
+      path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"
+    );
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    return pkg.version || null;
+  } catch {
+    return null;
+  }
+}
+
+// Simple semver-like comparison: split on "." and "-" to compare
+// numeric parts. Returns true if `remote` is newer than `local`.
+function isNewerVersion(local, remote) {
+  if (!local || !remote) return false;
+  const parseParts = (v) =>
+    v.split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
+  const lp = parseParts(local);
+  const rp = parseParts(remote);
+  for (let i = 0; i < Math.max(lp.length, rp.length); i++) {
+    const l = lp[i] || 0;
+    const r = rp[i] || 0;
+    if (r > l) return true;
+    if (r < l) return false;
+  }
+  return false;
+}
+
+let lastUpdateCheck = 0;
+let cachedRemoteVersion = null;
+
+async function checkForUpdate(force = false) {
+  // Throttle: don't check more than once per 10 minutes unless forced
+  const now = Date.now();
+  if (!force && now - lastUpdateCheck < 10 * 60 * 1000) return;
+  lastUpdateCheck = now;
+
+  const localVersion = readLocalVersion();
+  if (!localVersion) {
+    log("checkForUpdate: cannot read local version");
+    return;
+  }
+
+  try {
+    const res = await fetch(GITHUB_RAW_URL, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) {
+      log(`checkForUpdate: HTTP ${res.status}`, "ERROR");
+      return;
+    }
+    const remotePkg = await res.json();
+    const remoteVersion = remotePkg.version || null;
+    cachedRemoteVersion = remoteVersion;
+
+    if (isNewerVersion(localVersion, remoteVersion)) {
+      log(`Update available: ${localVersion} → ${remoteVersion}`);
+      await broadcastToApp("pi:update_available", {
+        localVersion,
+        remoteVersion,
+      });
+    } else {
+      log(`Up to date: ${localVersion} (remote: ${remoteVersion || "unknown"})`);
+    }
+  } catch (err) {
+    log(`checkForUpdate failed: ${err.message}`, "ERROR");
+  }
+}
+
+// ── Update executor ──────────────────────────────────────────────────────────
+// Runs git pull, npm install, and npm run build:webview in sequence,
+// broadcasting progress to the webview. After success, the user needs to
+// restart the app (or we can trigger a backend reload).
+
+async function runUpdate() {
+  const projectRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)), "..", ".."
+  );
+
+  const steps = [
+    { label: "Pulling latest code…", cmd: "git", args: ["pull", "--ff-only"] },
+    { label: "Installing dependencies…", cmd: "npm", args: ["install"] },
+    { label: "Building webview…", cmd: "npm", args: ["run", "build:webview"] },
+  ];
+
+  for (const step of steps) {
+    await broadcastToApp("pi:update_progress", { step: step.label, status: "running" });
+    log(`runUpdate: ${step.label}`);
+
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn(step.cmd, step.args, {
+          cwd: projectRoot,
+          stdio: ["ignore", "pipe", "pipe"],
+          shell: process.platform === "win32",
+        });
+
+        let stderr = "";
+        child.stderr?.on("data", (d) => { stderr += d.toString(); });
+        child.stdout?.on("data", (d) => { /* could log if verbose */ });
+
+        child.on("close", (code) => {
+          if (code === 0) resolve(undefined);
+          else reject(new Error(`${step.cmd} exited with code ${code}${stderr ? ": " + stderr.slice(-500) : ""}`));
+        });
+        child.on("error", reject);
+      });
+
+      await broadcastToApp("pi:update_progress", { step: step.label, status: "done" });
+    } catch (err) {
+      log(`runUpdate failed at "${step.label}": ${err.message}`, "ERROR");
+      await broadcastToApp("pi:update_progress", { step: step.label, status: "error", error: err.message });
+      await broadcastToApp("pi:update_done", { ok: false, error: err.message });
+      return;
+    }
+  }
+
+  log("runUpdate: all steps complete");
+  await broadcastToApp("pi:update_done", { ok: true });
 }
 
 // ── Pending login prompts: maps requestId → { resolve, reject }
@@ -597,6 +732,9 @@ ws.addEventListener("open", async () => {
     await broadcastProviders();
     broadcastSessionStats();
     log("Pinguin ready");
+
+    // Check for updates (non-blocking, silent)
+    checkForUpdate().catch((e) => log(`Initial update check failed: ${e.message}`, "ERROR"));
   } catch (err) {
     log(`Fatal: ${err.message}`, "ERROR");
     // Surface to webview instead of exiting silently.
@@ -668,6 +806,8 @@ ws.addEventListener("message", (event) => {
         broadcastProviders();
         broadcastSessionStats();
       }
+      // Re-check for updates on reconnect
+      checkForUpdate().catch((e) => log(`Update check on hello failed: ${e.message}`, "ERROR"));
     }
   } catch (err) {
     log(`Message parse error: ${err.message}`, "ERROR");

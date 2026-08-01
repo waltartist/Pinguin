@@ -1458,6 +1458,89 @@ body {
   50% { opacity: 0.35; }
 }
 
+/* Update button — shows when a new version is available on GitHub */
+.pi-dock-menu__update {
+  width: auto;
+  padding: 0 8px;
+  gap: 5px;
+  color: var(--accent-text);
+  border-color: var(--accent-border);
+  font-size: 11px;
+  font-weight: 500;
+  margin-right: 2px;
+  background: var(--accent-soft);
+}
+.pi-dock-menu__update:hover {
+  background: oklch(0.75 0.17 55 / 0.22) !important;
+  border-color: var(--accent) !important;
+}
+
+.pi-dock-update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: piRestartPulse 1.6s ease-in-out infinite;
+}
+
+/* Update running — shows progress step */
+.pi-dock-menu__update-running {
+  width: auto;
+  padding: 0 8px;
+  gap: 5px;
+  color: var(--text-muted);
+  border-color: var(--border-hi);
+  font-size: 11px;
+  font-weight: 500;
+  margin-right: 2px;
+  background: var(--surface-hi);
+  cursor: default;
+  opacity: 0.8;
+}
+
+.pi-dock-update-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--text-dim);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: piUpdateSpin 0.8s linear infinite;
+}
+
+@keyframes piUpdateSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Update done — transient success message */
+.pi-dock-menu__update-done {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--success);
+  margin-right: 2px;
+}
+
+/* Update error — clickable to dismiss */
+.pi-dock-menu__update-error {
+  width: auto;
+  padding: 0 8px;
+  gap: 3px;
+  color: var(--danger);
+  border-color: var(--danger-border);
+  font-size: 11px;
+  font-weight: 500;
+  margin-right: 2px;
+  background: var(--danger-soft);
+}
+.pi-dock-menu__update-error:hover {
+  background: var(--danger-bg) !important;
+}
+
 .pi-dock-menu__list {
   position: absolute;
   top: 26px;

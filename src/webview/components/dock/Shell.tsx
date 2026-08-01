@@ -52,6 +52,9 @@ interface MenuItem {
 function PanelMenu({ api }: { api: DockviewApi | null }) {
   const needsRestart = usePi((s) => s.needsRestart);
   const _setNeedsRestart = usePi((s) => s._setNeedsRestart);
+  const update = usePi((s) => s.update);
+  const runUpdate = usePi((s) => s.runUpdate);
+  const _resetUpdate = usePi((s) => s._resetUpdate);
 
   const handleReload = useCallback(() => {
     _setNeedsRestart(false);
@@ -128,6 +131,44 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
         >
           <span className="pi-dock-restart-dot" />
           Reload ↻
+        </button>
+      )}
+      {update.available && !update.running && (
+        <button
+          type="button"
+          className="pi-dock-menu__button pi-dock-menu__update"
+          onClick={() => runUpdate()}
+          title={`Update available: ${update.localVersion} → ${update.remoteVersion}. Click to update.`}
+        >
+          <span className="pi-dock-update-dot" />
+          Update
+        </button>
+      )}
+      {update.running && (
+        <button
+          type="button"
+          className="pi-dock-menu__button pi-dock-menu__update-running"
+          disabled
+          title={update.step || "Updating…"}
+        >
+          <span className="pi-dock-update-spinner" />
+          {update.step || "Updating…"}
+        </button>
+      )}
+      {update.stepStatus === "done" && !update.running && (
+        <span className="pi-dock-menu__update-done"
+        >
+          ✓ Updated — reloading…
+        </span>
+      )}
+      {update.stepStatus === "error" && !update.running && (
+        <button
+          type="button"
+          className="pi-dock-menu__button pi-dock-menu__update-error"
+          onClick={() => _resetUpdate()}
+          title={update.error || "Update failed"}
+        >
+          ⚠ Update failed
         </button>
       )}
       <button
