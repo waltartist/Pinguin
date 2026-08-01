@@ -381,9 +381,6 @@ async function handleWebviewInput(data) {
     } else if (type === "checkUpdate") {
       // Manual update check from the UI
       await checkForUpdate(true);
-    } else if (type === "runUpdate") {
-      // User clicked the Update button
-      await runUpdate();
     } else if (type === "listSessions") {
       // /resume — list previous sessions for the current cwd
       await handleListSessions();
@@ -616,58 +613,6 @@ async function checkForUpdate(force = false) {
   } catch (err) {
     log(`checkForUpdate failed: ${err.message}`, "ERROR");
   }
-}
-
-// ── Update executor ──────────────────────────────────────────────────────────
-// Runs git pull, npm install, and npm run build:webview in sequence,
-// broadcasting progress to the webview. After success, the user needs to
-// restart the app (or we can trigger a backend reload).
-
-async function runUpdate() {
-  const projectRoot = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)), "..", ".."
-  );
-
-  const steps = [
-    { label: "Pulling latest code…", cmd: "git", args: ["pull", "--ff-only"] },
-    { label: "Installing dependencies…", cmd: "npm", args: ["install"] },
-    { label: "Building webview…", cmd: "npm", args: ["run", "build:webview"] },
-  ];
-
-  for (const step of steps) {
-    await broadcastToApp("pi:update_progress", { step: step.label, status: "running" });
-    log(`runUpdate: ${step.label}`);
-
-    try {
-      await new Promise((resolve, reject) => {
-        const child = spawn(step.cmd, step.args, {
-          cwd: projectRoot,
-          stdio: ["ignore", "pipe", "pipe"],
-          shell: process.platform === "win32",
-        });
-
-        let stderr = "";
-        child.stderr?.on("data", (d) => { stderr += d.toString(); });
-        child.stdout?.on("data", (d) => { /* could log if verbose */ });
-
-        child.on("close", (code) => {
-          if (code === 0) resolve(undefined);
-          else reject(new Error(`${step.cmd} exited with code ${code}${stderr ? ": " + stderr.slice(-500) : ""}`));
-        });
-        child.on("error", reject);
-      });
-
-      await broadcastToApp("pi:update_progress", { step: step.label, status: "done" });
-    } catch (err) {
-      log(`runUpdate failed at "${step.label}": ${err.message}`, "ERROR");
-      await broadcastToApp("pi:update_progress", { step: step.label, status: "error", error: err.message });
-      await broadcastToApp("pi:update_done", { ok: false, error: err.message });
-      return;
-    }
-  }
-
-  log("runUpdate: all steps complete");
-  await broadcastToApp("pi:update_done", { ok: true });
 }
 
 // ── Pending login prompts: maps requestId → { resolve, reject }

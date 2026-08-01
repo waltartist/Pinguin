@@ -229,11 +229,8 @@ interface PiActions {
   _loginDone: (ok: boolean, error?: string) => void;
   _loginReset: () => void;
   _setUpdateAvailable: (localVersion: string, remoteVersion: string) => void;
-  _setUpdateProgress: (step: string, status: "running" | "done" | "error", error?: string) => void;
-  _setUpdateDone: (ok: boolean, error?: string) => void;
   _resetUpdate: () => void;
   checkForUpdate: () => void;
-  runUpdate: () => void;
   // Session management
   _openSessionView: (verb: string, target?: string) => void;
   _closeSessionView: () => void;
@@ -461,21 +458,11 @@ export const usePiStore = create<PiState & PiActions>()((set, get) => ({
   _setUpdateAvailable: (localVersion, remoteVersion) => set((s) => ({
       update: { ...s.update, available: true, localVersion, remoteVersion },
     })),
-  _setUpdateProgress: (step, status, error) => set((s) => ({
-      update: { ...s.update, running: true, step, stepStatus: status, error: error ?? null },
-    })),
-  _setUpdateDone: (ok, error) => set((s) => ({
-      update: { ...s.update, running: false, step: null, stepStatus: ok ? "done" : "error", error: error ?? null, available: ok ? false : s.update.available },
-    })),
   _resetUpdate: () => set((s) => ({
       update: { available: false, localVersion: null, remoteVersion: null, running: false, step: null, stepStatus: "idle", error: null },
     })),
   checkForUpdate: () => {
     Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "checkUpdate" });
-  },
-  runUpdate: () => {
-    set((s) => ({ update: { ...s.update, running: true, step: "Starting…", stepStatus: "running", error: null } }));
-    Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "runUpdate" });
   },
   requestSessionStats: () => {
     Neutralino?.extensions.dispatch("pi-backend", "pi:input", {

@@ -293,24 +293,6 @@ function initBridge() {
     }
   });
 
-  Neutralino.events.on("pi:update_progress", (raw: any) => {
-    const { step, status, error } = raw?.detail || {};
-    if (step && status) {
-      console.log(`[pi-gui] Update progress: ${step} — ${status}`);
-      usePiStore.getState()._setUpdateProgress(step, status, error);
-    }
-  });
-
-  Neutralino.events.on("pi:update_done", (raw: any) => {
-    const { ok, error } = raw?.detail || {};
-    console.log(`[pi-gui] Update done: ok=${ok}`);
-    usePiStore.getState()._setUpdateDone(ok, error);
-    if (ok) {
-      // Auto-reload the page after a brief delay so the new build is picked up
-      setTimeout(() => window.location.reload(), 1500);
-    }
-  });
-
   // ── Window close: exit the app cleanly so the Node extension is killed ──
   Neutralino.events.on("windowClose", () => {
     console.log("[pi-gui] windowClose — calling app.exit()");
