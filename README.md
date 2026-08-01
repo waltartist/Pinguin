@@ -1,7 +1,7 @@
 # Pinguin
 
 <p align="center">
-  <img src="docs/pinguin.png" alt="Pinguin" width="128" />
+  <img src="docs/pinguin.png" alt="Pinguin" width="100%" />
 </p>
 
 Pinguin is a desktop GUI for the
