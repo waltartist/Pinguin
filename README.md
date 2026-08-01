@@ -8,6 +8,8 @@ Pinguin is a desktop GUI for the
 [Pi coding agent](https://github.com/earendil-works/pi). It uses a lightweight
 Neutralinojs desktop shell, a React webview, and the Pi SDK.
 
+Fully vibe coded. I have no idea what I am doing.
+
 The chat view — streaming transcript, model
 selection, slash commands, thinking blocks, tool call rendering, and
 project-local GUI extensions — is the primary interface. Some Pi terminal
