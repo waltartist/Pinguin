@@ -270,7 +270,7 @@ function initBridge() {
   // ── Window close: exit the app cleanly so the Node extension is killed ──
   Neutralino.events.on("windowClose", () => {
     console.log("[pi-gui] windowClose — calling app.exit()");
-    Neutralino!.app.exit().catch((err: any) =>
+    Neutralino!.app!.exit().catch((err: any) =>
       console.error("[pi-gui] app.exit() failed:", err)
     );
   });
