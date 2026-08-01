@@ -1,8 +1,18 @@
 version: 2
 updates:
+  # All npm dependencies — security updates and version bumps
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-    allow:
-      - dependency-name: "@earendil-works/pi-coding-agent"
+    open-pull-requests-limit: 10
+    groups:
+      # Patch & minor updates batched together to reduce PR noise
+      patch-and-minor:
+        update-types:
+          - patch
+          - minor
+      # Major version bumps get individual PRs for review
+      major:
+        update-types:
+          - major

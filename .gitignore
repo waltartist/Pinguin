@@ -10,3 +10,6 @@ bin_*.txt
 .claude/
 design-ember/
 resources/assets/
+.env
+.env.*
+!.env.example
