@@ -9,3 +9,4 @@ bin_*.txt
 .DS_Store
 .claude/
 design-ember/
+resources/assets/

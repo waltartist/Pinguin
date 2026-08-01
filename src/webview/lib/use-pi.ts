@@ -199,6 +199,34 @@ function initBridge() {
     if (Array.isArray(list)) usePiStore.getState()._setAvailableModels(list);
   });
 
+  // Provider list for login UI
+  Neutralino.events.on("pi:providers", (raw: any) => {
+    const list = raw?.detail?.providers;
+    if (Array.isArray(list)) usePiStore.getState()._setProviders(list);
+  });
+
+  // Login interaction bridge
+  Neutralino.events.on("pi:login_prompt", (raw: any) => {
+    const { requestId, prompt } = raw?.detail || {};
+    if (requestId && prompt) {
+      usePiStore.getState()._loginSetPrompt({ requestId, prompt });
+    }
+  });
+
+  Neutralino.events.on("pi:login_notify", (raw: any) => {
+    const event = raw?.detail?.event;
+    if (event) usePiStore.getState()._loginSetNotify(event);
+  });
+
+  Neutralino.events.on("pi:login_done", (raw: any) => {
+    const { ok, error } = raw?.detail || {};
+    usePiStore.getState()._loginDone(ok, error);
+    // Reset after showing done state briefly
+    if (ok) {
+      setTimeout(() => usePiStore.getState()._loginReset(), 2000);
+    }
+  });
+
   Neutralino.events.on("pi:stats", (raw: any) => {
     const stats = raw?.detail?.stats;
     if (stats && typeof stats === "object") {
@@ -210,6 +238,12 @@ function initBridge() {
   Neutralino.events.on("pi:reload", () => {
     console.log("[pi-gui] Backend source changed — showing Reload button");
     usePiStore.getState()._setNeedsRestart(true);
+  });
+
+  // Built webview assets changed — auto-reload the page to pick up new code.
+  Neutralino.events.on("pi:webview_reload", () => {
+    console.log("[pi-gui] Webview resources changed — reloading page");
+    window.location.reload();
   });
 
   // ── Retry / fallback: if still not ready, re-request state ──

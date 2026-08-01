@@ -293,9 +293,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
                 zIndex: 9998,
                 background: "rgba(0,0,0,0.3)",
               }}
-              onClick={() => {
-                if (!suggestion) closeMenu();
-              }}
+              onClick={closeMenu}
             />
           )}
 

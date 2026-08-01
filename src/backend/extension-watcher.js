@@ -25,7 +25,17 @@ export function startExtensionWatcher(Neutralino) {
   // Watch for new/changed files in project-local gui-extensions
   fs.watch(GUI_EXTENSIONS_DIR, { recursive: true }, async (eventType, filename) => {
     if (!filename || !(filename.endsWith(".ts") || filename.endsWith(".tsx"))) return;
-    await compileExtension(path.join(GUI_EXTENSIONS_DIR, filename), filename.replace(/\.(ts|tsx)$/, ""), Neutralino);
+    const fullPath = path.join(GUI_EXTENSIONS_DIR, filename);
+    const extensionId = filename.replace(/\.(ts|tsx)$/, "");
+
+    // Detect deletion — the file no longer exists.
+    if (!fs.existsSync(fullPath)) {
+      console.log(`[extension-watcher] Extension removed: ${extensionId}`);
+      Neutralino.events.broadcast("ext:remove", { id: extensionId });
+      return;
+    }
+
+    await compileExtension(fullPath, extensionId, Neutralino);
   });
 
   console.log(`[extension-watcher] Watching ${GUI_EXTENSIONS_DIR}`);

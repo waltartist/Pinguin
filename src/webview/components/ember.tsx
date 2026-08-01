@@ -103,6 +103,33 @@ export const Icon = {
       <path d="M1.5 1.5V4H4M8 5v3l2 1.5" />
     </svg>
   ),
+  Agent: (p: SvgProps) => (
+    <svg viewBox="0 0 16 16" {...svgBase} {...p}>
+      <rect x="3.5" y="6" width="9" height="7" rx="2" />
+      <circle cx="6" cy="9.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="9.5" r="0.6" fill="currentColor" stroke="none" />
+      <path d="M6 11.5h4" />
+      <path d="M8 6V3.5" />
+      <circle cx="8" cy="2.5" r="1" />
+      <path d="M3.5 8.5H2M12.5 8.5H14" />
+    </svg>
+  ),
+  Key: (p: SvgProps) => (
+    <svg viewBox="0 0 16 16" {...svgBase} {...p}>
+      <circle cx="5" cy="11" r="3" />
+      <path d="M7 9l5.5-5.5" />
+      <path d="M11 4l1.5 1.5" />
+      <path d="M9.5 5.5l1.5 1.5" />
+    </svg>
+  ),
+  Globe: (p: SvgProps) => (
+    <svg viewBox="0 0 16 16" {...svgBase} {...p}>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M2 8h12" />
+      <path d="M8 2c2 2.5 2 9.5 0 12" />
+      <path d="M8 2c-2 2.5-2 9.5 0 12" />
+    </svg>
+  ),
 };
 
 export type PresenceState = "idle" | "thinking" | "ready";

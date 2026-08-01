@@ -228,8 +228,20 @@ export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands
     { name: "fork", description: "Fork the current session", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
     { name: "clone", description: "Clone a shared session", args: "<id>", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
     { name: "tree", description: "Show file tree", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
-    { name: "login", description: "Log in to cloud services", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
-    { name: "logout", description: "Log out of cloud services", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
+    { name: "login", description: "Log in to a provider", args: "[provider]", run: async (_ctx, args) => {
+      // The frontend handles the interactive login UI.
+      // If a provider is specified, jump straight to that provider.
+      return {
+        event: "pi:ui_command",
+        eventData: { verb: "login", target: args?.trim() || "" },
+      };
+    } },
+    { name: "logout", description: "Log out of a provider", args: "<provider>", run: async (_ctx, args) => {
+      return {
+        event: "pi:ui_command",
+        eventData: { verb: "logout", target: args?.trim() || "" },
+      };
+    } },
     { name: "resume", description: "Resume a previous session", args: "<id>", _stub: true, run: async () => ({ text: "Not yet available in GUI.", isError: true }) },
 
     // ── UI control surface (Fix 7) ──
@@ -256,22 +268,6 @@ export function createBuiltinRegistry({ broadcast, callMethod, broadcastCommands
       },
     },
 
-    {
-      name: "open",
-      description: "Open a file in the markdown viewer",
-      args: "<file>",
-      run: async (_ctx, args) => {
-        const trimmed = args?.trim();
-        if (!trimmed) return { text: "Usage: /open <file>", isError: true };
-        if (!trimmed.endsWith(".md")) {
-          return { text: `Only .md files are supported currently: ${trimmed}`, isError: true };
-        }
-        return {
-          event: "pi:ui_command",
-          eventData: { verb: "open", target: trimmed },
-        };
-      },
-    },
   ];
 
   return {

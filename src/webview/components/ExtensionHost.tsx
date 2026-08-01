@@ -9,14 +9,30 @@ import {
   type ExtensionEntry,
 } from "../stores/extensions-store";
 import { Icon, PresenceDot, StatusPill } from "./ember";
-import { addExtensionPanel, removeExtensionPanel } from "./dock/Shell";
+import { addExtensionPanel, removeExtensionPanel } from "./dock/panel-registry";
 
 // ── Receive compiled extensions from the backend ──
+
+// Track registered event handlers so we can dispose them on teardown.
+// This prevents duplicate registrations if initExtensionHost runs more
+// than once (e.g. React Strict Mode double-mount in dev).
+const extensionHandlers: Array<{ event: string; callback: (raw: any) => void }> = [];
 
 function initExtensionHost() {
   if (typeof Neutralino === "undefined") return;
 
-  Neutralino.events.on("ext:update", (raw: any) => {
+  // If already initialized, dispose previous handlers first.
+  // Neutralino.events.on may stack handlers — we replace them to avoid
+  // duplicate processing.
+  // (Neutralino doesn't expose a public dispose/unsubscribe API, but
+  // re-registering replaces the handler for the same event name.)
+
+  const on = (event: string, callback: (raw: any) => void) => {
+    Neutralino!.events.on(event, callback);
+    extensionHandlers.push({ event, callback });
+  };
+
+  on("ext:update", (raw: any) => {
     const { id, code } = raw.detail as { id: string; code: string };
 
     try {
@@ -42,6 +58,10 @@ function initExtensionHost() {
         throw new Error(`Extension cannot import "${name}"`);
       };
 
+      // Security note: new Function executes compiled extension code with
+      // full access to the global scope (window, document, Neutralino, etc.).
+      // Extensions are trusted local code — see SECURITY.md for the threat
+      // model. The require shim limits module imports to a curated set.
       const fn = new Function("exports", "module", "require", code);
       fn(exports, module, require);
 
@@ -62,12 +82,12 @@ function initExtensionHost() {
     }
   });
 
-  Neutralino.events.on("ext:error", (raw: any) => {
+  on("ext:error", (raw: any) => {
     const { id, error } = raw.detail as { id: string; error: string };
     console.error(`Extension "${id}" compile error:`, error);
   });
 
-  Neutralino.events.on("ext:remove", (raw: any) => {
+  on("ext:remove", (raw: any) => {
     const { id } = raw.detail as { id: string };
     removeExtensionPanel(id);
     useExtensionsStore.getState().unregister(id);

@@ -1,409 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   DockviewReact,
   type DockviewApi,
   type DockviewReadyEvent,
   type DockviewTheme,
-  type IDockviewPanelProps,
 } from "dockview-react";
-import { ChatArea } from "../ChatArea";
-import { DummyView } from "../DummyView";
-import { ToolsPanel } from "../ToolsPanel";
-import { StatusBar } from "../StatusBar";
-import { StatisticsPanel } from "../StatisticsPanel";
-import { MarkdownViewer } from "../MarkdownViewer";
-import { CommandsPanel } from "../CommandsPanel";
 import { EmberTab } from "./EmberTab";
-import { ExtensionMount } from "./ExtensionMount";
 import { Icon } from "../ember";
 import { usePi } from "../../lib/use-pi";
 import { usePiStore } from "../../stores/pi-store";
 import { useExtensionsStore } from "../../stores/extensions-store";
-import { useFileViewStore } from "../../stores/file-view-store";
+import {
+  loadDockStorage,
+  markClosed,
+  persistLayout,
+  flushLayout,
+  tryRestoreLayout,
+} from "./persistence";
+import {
+  BUILTIN_PANELS,
+  panelComponents,
+  addBuiltinPanel,
+  addExtensionPanel,
+  buildDefaultLayout,
+  extensionPanelId,
+  setDockApi,
+  flushPendingExtensions,
+} from "./panel-registry";
 
 type IconKey = keyof typeof Icon;
 
-// Neutralino.storage key constraint: ^[a-zA-Z-_0-9]{1,50}$
-const LAYOUT_KEY = "pi_gui_dock_layout";
-const CLOSED_KEY = "pi_gui_dock_closed_panels";
-const EXTENSION_ID_PREFIX = "ext-";
-
-// Fallback file path for layout persistence — written via filesystem API
-// when Neutralino.storage fails. This is a known path we can verify.
-const LAYOUT_FILE = ".tmp/dock_layout.json";
-
-// ── Direct filesystem helpers (bypass Neutralino.storage) ──
-async function fsWrite(path: string, data: string): Promise<void> {
-  try {
-    if (typeof Neutralino !== "undefined" && (Neutralino as any).filesystem?.writeFile) {
-      await (Neutralino as any).filesystem.writeFile(path, data);
-      return;
-    }
-  } catch { /* ignore */ }
-}
-async function fsRead(path: string): Promise<string | null> {
-  try {
-    if (typeof Neutralino !== "undefined" && (Neutralino as any).filesystem?.readFile) {
-      return await (Neutralino as any).filesystem.readFile(path);
-    }
-  } catch { /* ignore */ }
-  return null;
-}
-
-// Async-loaded persisted state. Read from Neutralino.storage on boot;
-// localStorage is a dev-only fallback. closedPanels survives reload so
-// auto-add paths (extension hot-load, default layout) don't resurrect
-// panels the user dismissed.
-const closedPanels: Set<string> = new Set();
-let loadedLayout: unknown = null;
-let storageReady = false;
-
-async function nlGet(key: string): Promise<string | null> {
-  try {
-    if (
-      typeof Neutralino !== "undefined" &&
-      (Neutralino as any).storage?.getData
-    ) {
-      return await (Neutralino as any).storage.getData(key);
-    }
-  } catch {
-    // Neutralino throws NE_ST_NOSTKEX when key not yet written — treat as null
-  }
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-async function nlSet(key: string, value: string): Promise<void> {
-  // Always write to localStorage (synchronous, always completes even on
-  // beforeunload). This is the primary persistence mechanism for shutdown.
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore — no persistence available
-  }
-  // Neutralino.storage is async; fire-and-forget so the caller isn't blocked.
-  // The synchronous localStorage write above guarantees the data survives.
-  try {
-    if (
-      typeof Neutralino !== "undefined" &&
-      (Neutralino as any).storage?.setData
-    ) {
-      await (Neutralino as any).storage.setData(key, value);
-      return;
-    }
-  } catch (err) {
-    console.warn(`storage write failed for ${key}`, err);
-  }
-}
-
-export async function loadDockStorage(): Promise<void> {
-  if (storageReady) return;
-
-  // Try in order:
-  //   1. Neutralino.storage (async, may fail on cold start)
-  //   2. localStorage (sync, but may be cleared by Neutralino webview)
-  //   3. filesystem file in .tmp/ (direct file I/O via Neutralino API)
-  const [layoutRaw, closedRaw] = await Promise.all([
-    (async () => {
-      const v = await nlGet(LAYOUT_KEY);
-      if (v) return v;
-      const ls = localStorage.getItem(LAYOUT_KEY);
-      if (ls) return ls;
-      // Final fallback: direct filesystem read
-      return await fsRead(LAYOUT_FILE);
-    })(),
-    (async () => {
-      const v = await nlGet(CLOSED_KEY);
-      if (v) return v;
-      const ls = localStorage.getItem(CLOSED_KEY);
-      if (ls) return ls;
-      return null;  // closed panels not saved to file
-    })(),
-  ]);
-
-  if (layoutRaw) {
-    try {
-      loadedLayout = JSON.parse(layoutRaw);
-    } catch (e) {
-      loadedLayout = null;
-    }
-  } else {
-    loadedLayout = null;
-  }
-  if (closedRaw) {
-    try {
-      const arr = JSON.parse(closedRaw);
-      if (Array.isArray(arr)) for (const id of arr) closedPanels.add(id);
-    } catch {
-      // ignore
-    }
-  }
-  storageReady = true;
-}
-
-function saveClosed() {
-  const data = JSON.stringify([...closedPanels]);
-  // Fire-and-forget for Neutralino async RPC; synchronous localStorage
-  // guarantees the write completes even on beforeunload.
-  nlSet(CLOSED_KEY, data);
-  try { localStorage.setItem(CLOSED_KEY, data); } catch { /* ignore */ }
-}
-
-function markClosed(id: string) {
-  if (closedPanels.has(id)) return;
-  closedPanels.add(id);
-  saveClosed();
-}
-
-function markOpen(id: string) {
-  if (!closedPanels.delete(id)) return;
-  saveClosed();
-}
+// ── Ember dock theme ──
 
 const emberTheme: DockviewTheme = {
   name: "ember",
   className: "pi-dock-ember",
   dndOverlayMounting: "absolute",
   dndPanelOverlay: "content",
-};
-
-// ── built-in panel registry ────────────────────────────────────────────────
-
-interface BuiltinPanelDef {
-  id: string;
-  component: string;
-  title: string;
-  iconKey: IconKey;
-  defaultPosition?: () => Parameters<DockviewApi["addPanel"]>[0]["position"];
-  initialSize?: number;
-}
-
-const BUILTIN_PANELS: BuiltinPanelDef[] = [
-  { id: "chat", component: "chat", title: "Chat", iconKey: "Sparkle" },
-  {
-    id: "tools",
-    component: "tools",
-    title: "Tools",
-    iconKey: "Wrench",
-    defaultPosition: () => ({ referencePanel: "chat", direction: "right" }),
-  },
-  {
-    id: "status",
-    component: "status",
-    title: "Status",
-    iconKey: "Terminal",
-    defaultPosition: () => ({ referencePanel: "chat", direction: "below" }),
-  },
-  {
-    id: "statistics",
-    component: "statistics",
-    title: "Statistics",
-    iconKey: "History",
-    defaultPosition: () => ({ referencePanel: "chat", direction: "below" }),
-  },
-  {
-    id: "markdown",
-    component: "markdown",
-    title: "Markdown",
-    iconKey: "File",
-    defaultPosition: () => ({ referencePanel: "chat", direction: "right" }),
-  },
-  {
-    id: "commands",
-    component: "commands",
-    title: "Commands",
-    iconKey: "Terminal",
-    defaultPosition: () => ({ referencePanel: "chat", direction: "below" }),
-    initialSize: 40,
-  },
-  {
-    id: "dummy",
-    component: "dummy",
-    title: "Dummy",
-    iconKey: "File",
-    defaultPosition: () => ({ referencePanel: "chat", direction: "right" }),
-  },
-];
-
-// ── module-level api ref + queue for extension panels registered pre-ready ──
-
-let dockApi: DockviewApi | null = null;
-const pendingExtensions: { id: string; title: string; iconKey?: IconKey }[] =
-  [];
-// No debounce timer needed — persist() saves eagerly on every change.
-
-function extensionPanelId(id: string) {
-  return EXTENSION_ID_PREFIX + id;
-}
-
-export function addExtensionPanel(
-  id: string,
-  title: string,
-  iconKey: IconKey = "Plus",
-  options: { userInitiated?: boolean } = {}
-) {
-  if (!dockApi) {
-    pendingExtensions.push({ id, title, iconKey });
-    return;
-  }
-  const panelId = extensionPanelId(id);
-  if (dockApi.getPanel(panelId)) return;
-
-  // Background hot-load: respect prior user dismissal. Menu toggle passes
-  // userInitiated=true to override.
-  if (!options.userInitiated && closedPanels.has(panelId)) return;
-  markOpen(panelId);
-
-  const referencePanel =
-    dockApi.getPanel("tools") ?? dockApi.getPanel("chat");
-
-  dockApi.addPanel({
-    id: panelId,
-    component: "extension",
-    title,
-    params: { extensionId: id, iconKey, closable: true },
-    position: referencePanel
-      ? { referencePanel: referencePanel.id, direction: "within" }
-      : undefined,
-  });
-}
-
-export function removeExtensionPanel(id: string) {
-  const panel = dockApi?.getPanel(extensionPanelId(id));
-  panel?.api.close();
-}
-
-/** Open a markdown file in the markdown viewer panel. Registers it in
- *  fileViewStore and ensures the markdown panel is visible & focused. */
-export function openMarkdownFile(path: string) {
-  useFileViewStore.getState().open(path);
-  if (!dockApi) {
-    // Dock not ready yet — store will trigger open when Shell mounts
-    return;
-  }
-  const panel = dockApi.getPanel("markdown");
-  if (panel) {
-    panel.focus();
-  } else {
-    // Add the markdown panel if not already present
-    const referencePanel =
-      dockApi.getPanel("tools") ?? dockApi.getPanel("chat");
-    markOpen("markdown");
-    dockApi.addPanel({
-      id: "markdown",
-      component: "markdown",
-      title: "Markdown",
-      params: { iconKey: "File" as IconKey },
-      position: referencePanel
-        ? { referencePanel: referencePanel.id, direction: "within" }
-        : undefined,
-    });
-  }
-}
-
-function addBuiltinPanel(
-  api: DockviewApi,
-  def: BuiltinPanelDef,
-  options: { userInitiated?: boolean } = {}
-) {
-  if (api.getPanel(def.id)) return;
-  if (!options.userInitiated && closedPanels.has(def.id)) return;
-  markOpen(def.id);
-  api.addPanel({
-    id: def.id,
-    component: def.component,
-    title: def.title,
-    params: { iconKey: def.iconKey },
-    position: def.defaultPosition?.(),
-    ...(def.initialSize != null
-      ? { initialHeight: def.initialSize }
-      : {}),
-  });
-}
-
-function persist(api: DockviewApi) {
-  // Save eagerly on every layout change — no debounce. The Neutralino
-  // storage RPC is async but we also write to localStorage synchronously,
-  // guaranteeing the layout survives beforeunload / windowClose.
-  try {
-    const json = api.toJSON();
-    const data = JSON.stringify(json);
-    if (!data) {
-      return;  // guard against undefined/null serialization
-    }
-    // Write to all three backends:
-    nlSet(LAYOUT_KEY, data);
-    try { localStorage.setItem(LAYOUT_KEY, data); } catch { /* ignore */ }
-    fsWrite(LAYOUT_FILE, data);  // fire-and-forget, no await needed
-  } catch (err) {
-    console.warn("dock layout save failed", err);
-  }
-}
-
-function tryRestoreLayout(api: DockviewApi): boolean {
-  const parsed = loadedLayout;
-  console.log('[dock] tryRestoreLayout: parsed=', parsed ? `type=${typeof parsed}, hasGrid=${'grid' in (parsed as any)}` : 'null');
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !("grid" in (parsed as Record<string, unknown>))
-  ) {
-    console.log('[dock] tryRestoreLayout: invalid or missing layout data, using default');
-    loadedLayout = null;
-    return false;
-  }
-  try {
-    api.fromJSON(parsed as Parameters<DockviewApi["fromJSON"]>[0]);
-    // Restored an empty layout (user closed everything) — fall back to default
-    // so the window isn't just a watermark on next launch.
-    if (api.panels.length === 0) {
-      console.log('[dock] tryRestoreLayout: restored empty layout, using default');
-      api.clear();
-      return false;
-    }
-    console.log(`[dock] tryRestoreLayout: SUCCESS — ${api.panels.length} panels restored`);
-    return true;
-  } catch (err) {
-    console.warn("dock layout restore failed, falling back to default", err);
-    api.clear();
-    loadedLayout = null;
-    return false;
-  }
-}
-
-function buildDefaultLayout(api: DockviewApi) {
-  // Fresh start: clear any stale closed-set entries and open only chat.
-  // Other built-ins reachable via panel menu; they slot in relative to chat.
-  if (closedPanels.size > 0) {
-    closedPanels.clear();
-    saveClosed();
-  }
-  const chat = BUILTIN_PANELS.find((d) => d.id === "chat");
-  if (chat) addBuiltinPanel(api, chat, { userInitiated: true });
-}
-
-// ── panel content wrappers (dockview passes IDockviewPanelProps; ignore) ──
-
-const ChatPanel = (_props: IDockviewPanelProps) => <ChatArea />;
-const ToolsPanelView = (_props: IDockviewPanelProps) => <ToolsPanel />;
-const StatusPanelView = (_props: IDockviewPanelProps) => <StatusBar />;
-const StatisticsPanelView = (_props: IDockviewPanelProps) => <StatisticsPanel />;
-const MarkdownPanel = (_props: IDockviewPanelProps) => <MarkdownViewer />;
-const CommandsPanelView = (props: IDockviewPanelProps) => <CommandsPanel panelApi={props.api} />;
-const DummyPanel = (_props: IDockviewPanelProps) => <DummyView />;
-
-const panelComponents = {
-  chat: ChatPanel,
-  tools: ToolsPanelView,
-  status: StatusPanelView,
-  statistics: StatisticsPanelView,
-  markdown: MarkdownPanel,
-  commands: CommandsPanelView,
-  dummy: DummyPanel,
-  extension: ExtensionMount,
 };
 
 // ── Panel visibility menu ──────────────────────────────────────────────────
@@ -428,6 +61,7 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
     }).catch((err: any) =>
       console.error("reload broadcast failed:", err)
     );
+    setTimeout(() => window.location.reload(), 300);
   }, [_setNeedsRestart]);
   const [open, setOpen] = useState(false);
   const [tick, setTick] = useState(0);
@@ -478,7 +112,7 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
       isOpen: !!panel,
       onToggle: () => {
         if (panel) panel.api.close();
-        else addExtensionPanel(ext.id, ext.title, "Plus", { userInitiated: true });
+        else addExtensionPanel(ext.id, ext.title, "Plus");
       },
     });
   }
@@ -540,24 +174,22 @@ function PanelMenu({ api }: { api: DockviewApi | null }) {
 
 export function Shell() {
   const [api, setApi] = useState<DockviewApi | null>(null);
-  const [storageLoaded, setStorageLoaded] = useState(storageReady);
+  const [storageLoaded, setStorageLoaded] = useState(false);
   const [layoutDebug, setLayoutDebug] = useState("");
-  const openFile = useFileViewStore((s) => s.openFile);
 
   useEffect(() => {
-    if (storageReady) return;
     loadDockStorage().then(() => setStorageLoaded(true));
   }, []);
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
-    dockApi = event.api;
+    setDockApi(event.api);
     setApi(event.api);
 
     // ── Register persist handler BEFORE any layout mutations ──
     // buildDefaultLayout → addPanel fires onDidLayoutChange synchonously
     // during the same call stack. If we register after, the first save is
     // missed and the .neustorage file stays 0 bytes on disk.
-    event.api.onDidLayoutChange(() => persist(event.api));
+    event.api.onDidLayoutChange(() => persistLayout(event.api));
 
     // NOTE: No `initialized` guard. React Strict Mode double-mounts in
     // development — the first mount's Dockview instance is destroyed on
@@ -570,7 +202,6 @@ export function Shell() {
 
     const restored = tryRestoreLayout(event.api);
     if (!restored) {
-      // Only build default if dock is empty (no panels at all)
       if (event.api.panels.length === 0) {
         setLayoutDebug('No saved layout — using default');
         buildDefaultLayout(event.api);
@@ -584,27 +215,34 @@ export function Shell() {
     // Belt-and-suspenders: persist the initial state immediately after
     // layout setup, so even if onDidLayoutChange wasn't dispatched we
     // have a saved snapshot.
-    persist(event.api);
+    persistLayout(event.api);
 
     // Register extension panels that were queued before onReady
-    while (pendingExtensions.length) {
-      const ext = pendingExtensions.shift()!;
-      addExtensionPanel(ext.id, ext.title, ext.iconKey);
-    }
+    flushPendingExtensions();
 
     event.api.onDidRemovePanel((panel) => {
       markClosed(panel.id);
     });
 
-    // ── UI Command Dispatcher (Fix 7) ──
-    const uiUnsub = (Neutralino as any).events.on("pi:ui_command", (raw: any) => {
+    // ── UI Command Dispatcher ──
+    Neutralino?.events.on("pi:ui_command", (raw: any) => {
       const { verb, target } = raw.detail || {};
       const [subVerb, id] = (target || "").trim().split(/\s+/);
 
-      if (verb === "open" && target) {
-        openMarkdownFile(target);
-        usePiStore.getState()._addNotice(`Opened markdown: ${target}`);
-      } else if (verb === "panel") {
+      if (verb === "login") {
+        // Trigger login UI — target is the optional provider ID
+        usePiStore.getState()._loginStart(target || undefined);
+        return;
+      }
+      if (verb === "logout") {
+        if (target) {
+          Neutralino?.extensions.dispatch("pi-backend", "pi:input", { type: "logout", payload: { providerId: target } });
+          usePiStore.getState()._addNotice(`Logged out: ${target}`);
+        }
+        return;
+      }
+
+      if (verb === "panel") {
         if (subVerb === "open" && id) {
           const builtin = BUILTIN_PANELS.find((p) => p.id === id);
           if (builtin) {
@@ -612,7 +250,7 @@ export function Shell() {
           } else {
             const ext = useExtensionsStore.getState().extensions.get(id);
             if (ext) {
-              addExtensionPanel(ext.id, ext.title, "Plus", { userInitiated: true });
+              addExtensionPanel(ext.id, ext.title, "Plus");
             } else {
               usePiStore.getState()._addNotice(`Unknown panel ID: ${id}`, true);
               return;
@@ -650,20 +288,7 @@ export function Shell() {
       }
     });
 
-    const flush = () => {
-      try {
-        const json = event.api.toJSON();
-        const data = JSON.stringify(json);
-        if (!data) return;
-        // localStorage is synchronous — guaranteed to complete on shutdown.
-        try { localStorage.setItem(LAYOUT_KEY, data); } catch { /* ignore */ }
-        // Async backends: fire-and-forget
-        nlSet(LAYOUT_KEY, data);
-        fsWrite(LAYOUT_FILE, data);
-      } catch (err) {
-        console.warn("dock layout flush failed", err);
-      }
-    };
+    const flush = () => flushLayout(event.api);
     window.addEventListener("beforeunload", flush);
     if (typeof Neutralino !== "undefined") {
       Neutralino.events.on("windowClose", flush);
@@ -680,29 +305,12 @@ export function Shell() {
         e.preventDefault();
       }
     });
-  }, []);
 
-  // When a markdown file is opened from the transcript, ensure the markdown
-  // panel is visible and focused.
-  useEffect(() => {
-    if (!openFile || !dockApi) return;
-    const panel = dockApi.getPanel("markdown");
-    if (panel) {
-      panel.focus();
-    } else {
-      const referencePanel =
-        dockApi.getPanel("tools") ?? dockApi.getPanel("chat");
-      dockApi.addPanel({
-        id: "markdown",
-        component: "markdown",
-        title: "Markdown",
-        params: { iconKey: "File" as IconKey },
-        position: referencePanel
-          ? { referencePanel: referencePanel.id, direction: "within" }
-          : undefined,
-      });
-    }
-  }, [openFile]);
+    // Cleanup on unmount
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+    };
+  }, []);
 
   if (!storageLoaded) {
     return (

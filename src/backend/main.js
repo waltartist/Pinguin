@@ -31,6 +31,15 @@ function removeConnectionCache() {
   } catch {}
 }
 
+// ── Cleanup on crash / signal so the temp file with tokens doesn't linger ──
+process.on("exit", removeConnectionCache);
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    removeConnectionCache();
+    process.exit(0);
+  });
+}
+
 function getConnectionInfo() {
   // On reload spawn, the child is started with --reloaded flag.
   // It bypasses stdin (already consumed) and reads directly from cache.
@@ -183,31 +192,39 @@ function broadcastModels() {
   );
 }
 
+// ── Shared stats serializer (used by broadcastSessionStats, pi:ready, pi:hello) ──
+function serializeStats() {
+  if (!session) return null;
+  const s = session.getSessionStats();
+  return {
+    sessionId: s.sessionId,
+    sessionName: session.sessionName || null,
+    sessionFile: s.sessionFile || null,
+    userMessages: s.userMessages,
+    assistantMessages: s.assistantMessages,
+    toolCalls: s.toolCalls,
+    toolResults: s.toolResults,
+    totalMessages: s.totalMessages,
+    tokens: {
+      input: s.tokens.input,
+      output: s.tokens.output,
+      cacheRead: s.tokens.cacheRead,
+      cacheWrite: s.tokens.cacheWrite,
+      total: s.tokens.total,
+    },
+    cost: s.cost,
+    contextUsage: s.contextUsage || null,
+  };
+}
+
 function broadcastSessionStats() {
   if (!session) return;
   try {
-    const stats = session.getSessionStats();
-    broadcastToApp("pi:stats", {
-      stats: {
-        sessionId: stats.sessionId,
-        sessionName: session.sessionName || null,
-        sessionFile: stats.sessionFile || null,
-        userMessages: stats.userMessages,
-        assistantMessages: stats.assistantMessages,
-        toolCalls: stats.toolCalls,
-        toolResults: stats.toolResults,
-        totalMessages: stats.totalMessages,
-        tokens: {
-          input: stats.tokens.input,
-          output: stats.tokens.output,
-          cacheRead: stats.tokens.cacheRead,
-          cacheWrite: stats.tokens.cacheWrite,
-          total: stats.tokens.total,
-        },
-        cost: stats.cost,
-        contextUsage: stats.contextUsage || null,
-      },
-    }).catch((e) => log(`Broadcast stats failed: ${e.message}`, "ERROR"));
+    const stats = serializeStats();
+    if (!stats) return;
+    broadcastToApp("pi:stats", { stats }).catch((e) =>
+      log(`Broadcast stats failed: ${e.message}`, "ERROR")
+    );
   } catch (err) {
     log(`getSessionStats failed: ${err.message}`, "ERROR");
   }
@@ -258,7 +275,7 @@ async function handleWebviewInput(data) {
       const { provider, id } = payload || {};
       log(`handleWebviewInput: switchModel to ${provider}:${id}`);
       // Refresh registry to pick up models.json changes (Pi TUI does this too)
-      session.modelRegistry.refresh();
+      await session.modelRegistry.refresh();
       const available = session.modelRegistry.getAvailable();
       const found = provider
         ? available.find((m) => m.provider === provider && m.id === id)
@@ -325,6 +342,21 @@ async function handleWebviewInput(data) {
       await broadcastToApp("pi:files_result", { requestId, items });
     } else if (type === "getStats") {
       broadcastSessionStats();
+    } else if (type === "getProviders") {
+      broadcastProviders();
+    } else if (type === "login") {
+      await handleLogin(payload?.providerId, payload?.authType);
+    } else if (type === "loginResponse") {
+      // Frontend responded to a login prompt
+      const { requestId, value, error } = payload || {};
+      const pending = pendingLoginPrompts.get(requestId);
+      if (pending) {
+        pendingLoginPrompts.delete(requestId);
+        if (error) pending.reject(new Error(error));
+        else pending.resolve(value);
+      }
+    } else if (type === "logout") {
+      await handleLogout(payload?.providerId);
     } else if (type === "reload_backend") {
       // User clicked "Reload" in the frontend.
       // Spawn a fresh process that inherits our stdio pipes, then exit.
@@ -373,6 +405,160 @@ try {
   log(`File watcher setup failed (non-fatal): ${err.message}`, "ERROR");
 }
 
+// ── File watcher: detect webview resource changes (built assets in
+//    resources/) and auto-reload the webview. Uses fs.watchFile (polling)
+//    instead of fs.watch because the sync-resources Vite plugin atomically
+//    swaps the resources/ directory (delete + rename), which breaks
+//    fs.watch watchers on the directory itself.
+try {
+  const projectRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)), "..", ".."
+  );
+  const resourcesIndex = path.join(projectRoot, "resources", "index.html");
+  let lastWebviewReload = 0;
+  fs.watchFile(resourcesIndex, { interval: 2000 }, () => {
+    const now = Date.now();
+    if (now - lastWebviewReload < 3000) return; // debounce
+    lastWebviewReload = now;
+    log("Webview resources changed — broadcasting pi:webview_reload");
+    broadcastToApp("pi:webview_reload", {}).catch((e) =>
+      log(`broadcast pi:webview_reload failed: ${e.message}`, "ERROR")
+    );
+  });
+} catch (err) {
+  log(`Webview watcher setup failed (non-fatal): ${err.message}`, "ERROR");
+}
+
+// ── Pending login prompts: maps requestId → { resolve, reject }
+//    Used to bridge async AuthInteraction.prompt() callbacks through
+//    Neutralino events back to the webview.
+const pendingLoginPrompts = new Map();
+
+// ── Login provider list ─────────────────────────────────────────────────────
+// Returns all registered providers with their auth methods and status.
+function getProviderList() {
+  if (!session) return [];
+  const runtime = session.modelRuntime;
+  const providers = runtime.getProviders();
+  return providers.map((p) => {
+    const authStatus = runtime.getProviderAuthStatus(p.id);
+    const hasApiKey = !!p.auth?.apiKey;
+    const hasOAuth = !!p.auth?.oauth;
+    const authTypes = [];
+    if (hasApiKey) authTypes.push("api_key");
+    if (hasOAuth) authTypes.push("oauth");
+    return {
+      id: p.id,
+      name: p.name ?? p.id,
+      authTypes,
+      configured: authStatus?.configured ?? false,
+      authSource: authStatus?.source ?? null,
+      authLabel: authStatus?.label ?? null,
+    };
+  });
+}
+
+function broadcastProviders() {
+  return broadcastToApp("pi:providers", { providers: getProviderList() }).catch((e) =>
+    log(`Broadcast providers failed: ${e.message}`, "ERROR")
+  );
+}
+
+// ── Login interaction bridge ────────────────────────────────────────────────
+// Bridges the AuthInteraction callbacks (prompt, notify) through Neutralino
+// events so the webview can render the UI.
+async function handleLogin(providerId, authType) {
+  if (!session) return;
+  const runtime = session.modelRuntime;
+  const provider = runtime.getProvider(providerId);
+  if (!provider) {
+    await broadcastToApp("pi:login_done", {
+      ok: false,
+      error: `Unknown provider: ${providerId}`,
+    });
+    return;
+  }
+
+  const interaction = {
+    signal: AbortSignal.timeout(300_000), // 5-minute timeout
+    prompt: async (prompt) => {
+      const requestId = crypto.randomUUID();
+      return new Promise((resolve, reject) => {
+        pendingLoginPrompts.set(requestId, { resolve, reject });
+        broadcastToApp("pi:login_prompt", { requestId, prompt }).catch((e) =>
+          log(`login prompt broadcast failed: ${e.message}`, "ERROR")
+        );
+      });
+    },
+    notify: (event) => {
+      broadcastToApp("pi:login_notify", { event }).catch((e) =>
+        log(`login notify broadcast failed: ${e.message}`, "ERROR")
+      );
+    },
+  };
+
+  try {
+    await runtime.login(providerId, authType, interaction);
+
+    // After successful login, refresh models and pick a default if none is set.
+    await runtime.refresh();
+    const available = await runtime.getAvailable();
+    let selectedModel = null;
+    if (!session.model && available.length > 0) {
+      // Pick the first available model from the provider we just logged in to.
+      const providerModels = available.filter((m) => m.provider === providerId);
+      if (providerModels.length > 0) {
+        try {
+          await session.setModel(providerModels[0]);
+          selectedModel = { provider: providerModels[0].provider, id: providerModels[0].id };
+        } catch (err) {
+          log(`login: auto-select model failed: ${err.message}`, "ERROR");
+        }
+      }
+    }
+
+    await broadcastToApp("pi:login_done", {
+      ok: true,
+      providerId,
+      providerName: provider.name ?? providerId,
+      selectedModel,
+    });
+
+    // Broadcast updated state
+    if (selectedModel) {
+      await broadcastToApp("pi:model", { model: selectedModel });
+    }
+    await broadcastModels();
+    await broadcastProviders();
+    broadcastSessionStats();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await broadcastToApp("pi:login_done", {
+      ok: false,
+      error: msg === "Login cancelled" ? "Cancelled" : msg,
+    });
+  }
+}
+
+async function handleLogout(providerId) {
+  if (!session) return;
+  try {
+    await session.modelRuntime.logout(providerId);
+    await broadcastToApp("pi:login_done", {
+      ok: true,
+      logout: true,
+      providerId,
+    });
+    await broadcastModels();
+    await broadcastProviders();
+  } catch (err) {
+    await broadcastToApp("pi:login_done", {
+      ok: false,
+      error: err.message || String(err),
+    });
+  }
+}
+
 // ── Input queue: serialize pi:input messages so that commands
 //    (/model, /new, etc.) always complete before the next prompt
 //    is dispatched to the session.
@@ -398,33 +584,7 @@ ws.addEventListener("open", async () => {
 
     // Signal webview that Pi is ready — embed initial stats so the UI
     // has them immediately without requiring a separate getStats request.
-    let initialStats = null;
-    try {
-      if (session) {
-        const s = session.getSessionStats();
-        initialStats = {
-          sessionId: s.sessionId,
-          sessionName: session.sessionName || null,
-          sessionFile: s.sessionFile || null,
-          userMessages: s.userMessages,
-          assistantMessages: s.assistantMessages,
-          toolCalls: s.toolCalls,
-          toolResults: s.toolResults,
-          totalMessages: s.totalMessages,
-          tokens: {
-            input: s.tokens.input,
-            output: s.tokens.output,
-            cacheRead: s.tokens.cacheRead,
-            cacheWrite: s.tokens.cacheWrite,
-            total: s.tokens.total,
-          },
-          cost: s.cost,
-          contextUsage: s.contextUsage || null,
-        };
-      }
-    } catch (err) {
-      log(`Initial stats failed: ${err.message}`, "ERROR");
-    }
+    const initialStats = serializeStats();
     await broadcastToApp("pi:ready", { cwd: process.cwd(), stats: initialStats });
     // Send current model info
     if (session.model) {
@@ -434,6 +594,7 @@ ws.addEventListener("open", async () => {
     }
     await broadcastCommands();
     await broadcastModels();
+    await broadcastProviders();
     broadcastSessionStats();
     log("Pinguin ready");
   } catch (err) {
@@ -492,33 +653,7 @@ ws.addEventListener("message", (event) => {
     // Webview just connected — rebroadcast current status
     if (msg.event === "pi:hello") {
       log("Received pi:hello from webview — rebroadcasting pi:ready with stats");
-      let helloStats = null;
-      try {
-        if (session) {
-          const s = session.getSessionStats();
-          helloStats = {
-            sessionId: s.sessionId,
-            sessionName: session.sessionName || null,
-            sessionFile: s.sessionFile || null,
-            userMessages: s.userMessages,
-            assistantMessages: s.assistantMessages,
-            toolCalls: s.toolCalls,
-            toolResults: s.toolResults,
-            totalMessages: s.totalMessages,
-            tokens: {
-              input: s.tokens.input,
-              output: s.tokens.output,
-              cacheRead: s.tokens.cacheRead,
-              cacheWrite: s.tokens.cacheWrite,
-              total: s.tokens.total,
-            },
-            cost: s.cost,
-            contextUsage: s.contextUsage || null,
-          };
-        }
-      } catch (err) {
-        log(`Hello stats failed: ${err.message}`, "ERROR");
-      }
+      const helloStats = serializeStats();
       broadcastToApp("pi:ready", { cwd: process.cwd(), stats: helloStats }).catch((e) =>
         log(`Rebroadcast ready failed: ${e.message}`, "ERROR")
       );
@@ -530,6 +665,7 @@ ws.addEventListener("message", (event) => {
         }
         broadcastCommands();
         broadcastModels();
+        broadcastProviders();
         broadcastSessionStats();
       }
     }
