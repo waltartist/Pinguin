@@ -25,10 +25,10 @@
     "check": "npm run typecheck && npm run build:webview"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.82.0",
-    "@neutralinojs/lib": "^6.7.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@neutralinojs/lib": "^6.9.0",
     "dockview-react": "^4.13.1",
-    "esbuild": "0.28.0",
+    "esbuild": "0.28.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-markdown": "^10.1.0",
@@ -36,13 +36,13 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
-    "@neutralinojs/neu": "^11.0.0",
+    "@neutralinojs/neu": "^11.7.2",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-react": "6.0.5",
     "concurrently": "^9.0.0",
     "typescript": "^5.5.0",
-    "vite": "8.0.14"
+    "vite": "8.2.0"
   },
   "overrides": {
     "uuid": "11.1.1"
